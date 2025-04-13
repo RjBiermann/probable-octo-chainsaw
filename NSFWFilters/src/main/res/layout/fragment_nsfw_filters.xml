@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:padding="20dp"
+    tools:context="com.rjbiermann.NSFWFiltersFragment">
+
+    <TextView
+        android:id="@+id/disclaimerText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="15dp"
+        android:text="@string/disclaimer"
+        android:textAlignment="center"
+        android:textAllCaps="false"
+        android:textStyle="italic" />
+
+    <Switch
+        android:id="@+id/hdOnly"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="15dp"
+        android:text="@string/hd_only"
+        android:textSize="18sp" />
+
+    <TextView
+        android:id="@+id/duration"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/duration"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginBottom="15dp"
+        android:gravity="center_horizontal"
+        android:orientation="horizontal">
+
+        <EditText
+            android:id="@+id/minDuration"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ems="3"
+            android:hint="@string/min_duration"
+            android:inputType="numberDecimal" />
+
+        <EditText
+            android:id="@+id/maxDuration"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ems="3"
+            android:hint="@string/max_duration"
+            android:inputType="numberDecimal" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/addSearchHome"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/add_search_home"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <EditText
+        android:id="@+id/searchHomeEdit"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="15dp"
+        android:ems="10"
+        android:hint="@string/add_search_home_hint"
+        android:inputType="text" />
+
+    <TextView
+        android:id="@+id/searchSort"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/search_sorting"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/searchSortHint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/search_sorting_all"
+        android:textAlignment="center"
+        android:textAllCaps="false"
+        android:textStyle="italic" />
+
+    <EditText
+        android:id="@+id/addSearchSort"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="15dp"
+        android:ems="10"
+        android:hint="@string/search_sorting_hint"
+        android:inputType="text" />
+
+    <Button
+        android:id="@+id/saveButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/save_button" />
+
+    <Button
+        android:id="@+id/clearButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/clear_button" />
+
+</LinearLayout>

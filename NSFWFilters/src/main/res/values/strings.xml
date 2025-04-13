@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hd_only">HD only</string>
+    <string name="duration">Duration</string>
+    <string name="min_duration">Min</string>
+    <string name="max_duration">Max</string>
+    <string name="save_button">Save</string>
+    <string name="saved_toast">Filters saved</string>
+    <string name="add_search_home">Add search feed to home (App restart might be needed)</string>
+    <string name="add_search_home_hint">Comma separated phrases</string>
+    <string name="search_sorting">Sorting (Applied for home search feed and main search)</string>
+    <string name="search_sorting_all">relevant(default), recent, viewed, rated, longest, daily, weekly, monthly, yearly, all(default)</string>
+    <string name="search_sorting_hint">Ex. viewed,daily OR rated,yearly OR recent</string>
+    <string name="clear_button">Clear</string>
+    <string name="cleared_toast">Filters cleared</string>
+    <string name="disclaimer">These are applied only if the extensions use the filters</string>
+    <!--<string-array name="home_sort_by">
+        <item>Featured</item>
+        <item>Most Viewed</item>
+        <item>Top Rated</item>
+        <item>Hottest</item>
+        <item>Longest</item>
+        <item>Newest</item>
+    </string-array>
+    <string-array name="search_sort_by">
+        <item>Relevant</item>
+        <item>Recent</item>
+        <item>Most Viewed</item>
+        <item>Top Rated</item>
+        <item>Longest</item>
+    </string-array>
+    <string-array name="sort_time">
+        <item>Daily</item>
+        <item>Weekly</item>
+        <item>Monthly</item>
+        <item>Yearly</item>
+        <item>All time</item>
+    </string-array>-->
+</resources>
