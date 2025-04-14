@@ -87,11 +87,11 @@ class NSFWFiltersFragment(
             maxDurationEditText.setText(sharedPref.getInt(MAX_DURATION, 0).toString())
         }
         searchHomeEditText.setText(
-            sharedPref.getStringSet(HOME_SEARCH_SET, emptySet<String>())?.joinToString(",")
+            sharedPref.getString(HOME_SEARCH_STRING, "")
         )
         hdOnlySwitch.isChecked = sharedPref.getBoolean(HD_ONLY, false)
         addSearchHomeSortEditText.setText(
-            sharedPref.getStringSet(HOME_SEARCH_SORT, emptySet<String>())?.joinToString(",")
+            sharedPref.getString(HOME_SEARCH_SORT, "")
         )
 
         // Handle save_button button
@@ -100,14 +100,13 @@ class NSFWFiltersFragment(
                 putBoolean(HD_ONLY, hdOnlySwitch.isChecked)
                 putInt(MIN_DURATION, minDurationEditText.text.toString().trim().toIntOrNull() ?: 0)
                 putInt(MAX_DURATION, maxDurationEditText.text.toString().trim().toIntOrNull() ?: 0)
-                putStringSet(
-                    HOME_SEARCH_SET,
-                    searchHomeEditText.text.toString().trim().split(",").toMutableSet()
+                putString(
+                    HOME_SEARCH_STRING,
+                    searchHomeEditText.text.toString()
                 )
-                putStringSet(
+                putString(
                     HOME_SEARCH_SORT,
-                    addSearchHomeSortEditText.text.toString().lowercase().trim().split(",")
-                        .toMutableSet()
+                    addSearchHomeSortEditText.text.toString()
                 )
                 apply()
             }

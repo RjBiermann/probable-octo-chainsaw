@@ -5,15 +5,17 @@ import android.content.SharedPreferences
 const val HD_ONLY = "hdOnly"
 const val MIN_DURATION = "minDuration"
 const val MAX_DURATION = "maxDuration"
-const val HOME_SEARCH_SET = "homeSearchSet"
+const val HOME_SEARCH_STRING = "homeSearchString"
 const val HOME_SEARCH_SORT = "homeSearchSort"
+
+const val NSFWFiltersKey = "NSFWFiltersV2"
 
 data class NSFWFilters(
     val hdOnly: Boolean,
     val minDuration: Int,
     val maxDuration: Int,
-    val homeSearch: List<String>?,
-    val homeSearchSort: List<String>?
+    val homeSearch: String,
+    val homeSearchSort: String
 )
 
 fun getNSFWFilters(sharedPref: SharedPreferences): NSFWFilters {
@@ -21,7 +23,7 @@ fun getNSFWFilters(sharedPref: SharedPreferences): NSFWFilters {
         sharedPref.getBoolean(HD_ONLY,false),
         sharedPref.getInt(MIN_DURATION,0),
         sharedPref.getInt(MAX_DURATION,0),
-        sharedPref.getStringSet(HOME_SEARCH_SET,emptySet<String>())?.toList(),
-        sharedPref.getStringSet(HOME_SEARCH_SORT,emptySet<String>())?.toList()
+        sharedPref.getString(HOME_SEARCH_STRING,"")?:"",
+        sharedPref.getString(HOME_SEARCH_SORT,"")?:""
     )
 }

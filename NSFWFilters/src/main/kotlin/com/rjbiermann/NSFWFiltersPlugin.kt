@@ -10,7 +10,7 @@ class TestPlugin : Plugin() {
     var activity: AppCompatActivity? = null
 
     override fun load(context: Context) {
-        val sharedPref = context.getSharedPreferences("NSFWFilters", Context.MODE_PRIVATE)
+        val sharedPref = context.getSharedPreferences(NSFWFiltersKey, Context.MODE_PRIVATE)
         activity = context as AppCompatActivity
 
         openSettings = {

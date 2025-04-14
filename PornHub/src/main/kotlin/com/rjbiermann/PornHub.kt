@@ -1,7 +1,8 @@
 package com.rjbiermann
 
-import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
+import com.lagradost.cloudstream3.APIHolder.capitalize
 import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.HomePageList
 import com.lagradost.cloudstream3.HomePageResponse
@@ -30,9 +31,8 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONObject
 import org.jsoup.nodes.Element
-import java.util.Locale
 
-class PornHub(context: Context) : MainAPI() {
+class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
     private val globalTvType = TvType.NSFW
     override var mainUrl = "https://www.pornhub.com"
     override var name = "PornHub"
@@ -44,24 +44,22 @@ class PornHub(context: Context) : MainAPI() {
     override val supportedTypes = setOf(TvType.NSFW)
     override val vpnStatus = VPNStatus.MightBeNeeded
 
-    val sharedPref = context.getSharedPreferences("NSFWFilters", Context.MODE_PRIVATE)
-
     val nsfwFilters = getNSFWFilters(sharedPref)
 
-    val homeSearch =
-        nsfwFilters.homeSearch?.filter { search -> search.isNotBlank() }?.mapNotNull { search ->
+    val homeSearch = nsfwFilters.homeSearch.split(",").filter { search -> search.isNotBlank() }
+        .map { search ->
             val url = "$mainUrl/video/search"
             val httpUrl = url.toHttpUrl()
             val builder = httpUrl.newBuilder()
             builder.setQueryParameter("search", search.replace(" ", "+"))
-            setSort(builder.toString().toHttpUrl()).toString() to search.capitalize(Locale.ROOT)
-        }?.toTypedArray()
+            setSort(builder.toString().toHttpUrl()).toString() to search.capitalize()
+        }.toTypedArray()
 
     override val mainPage = mainPageOf(
         "$mainUrl/video" to "Recently Featured ",
         "$mainUrl/video?o=mv" to "This Week's Most Viewed",
-        "$mainUrl/video?o=tr" to "This Month's Top Rated",
-        *homeSearch ?: emptyArray()
+        "$mainUrl/video?o=tr&t=w" to "This Week's Top Rated",
+        *homeSearch
     )
     private val cookies = mapOf(Pair("hasVisited", "1"), Pair("accessAgeDisclaimerPH", "1"))
 
@@ -75,7 +73,10 @@ class PornHub(context: Context) : MainAPI() {
 
             val soup = app.get(httpUrl.toString(), cookies = cookies).document
 
-            if(soup.select("div.noResultsWrapper div#noResultBigText").isNotEmpty() || soup.select("div.sectionWrapper div.noVideosNotice").isNotEmpty()) {
+            if (soup.select("div.noResultsWrapper div#noResultBigText").isNotEmpty() || soup.select(
+                    "div.sectionWrapper div.noVideosNotice"
+                ).isNotEmpty()
+            ) {
                 throw ErrorLoadingException("No homepage data found!")
             }
 
@@ -118,7 +119,10 @@ class PornHub(context: Context) : MainAPI() {
             httpUrl = setSort(httpUrl)
             Log.d("pornhub", httpUrl.toString())
             val document = app.get(httpUrl.toString(), cookies = cookies).document
-            if(document.select("div.noResultsWrapper div#noResultBigText").isNotEmpty() || document.select("div.sectionWrapper div.noVideosNotice").isNotEmpty()) {
+            if (document.select("div.noResultsWrapper div#noResultBigText")
+                    .isNotEmpty() || document.select("div.sectionWrapper div.noVideosNotice")
+                    .isNotEmpty()
+            ) {
                 break
             }
             val result = document.select("div.sectionWrapper div.wrap")
@@ -218,7 +222,7 @@ class PornHub(context: Context) : MainAPI() {
                 ).amap { stream ->
                     extlinkList.add(
                         newExtractorLink(
-                            source = name, name = "${name}", url = stream.streamUrl
+                            source = name, name = name, url = stream.streamUrl
                         ) {
                             this.referer = mainUrl
                             this.quality = Regex("(\\d+)").find(quality ?: "")?.groupValues?.get(1)
@@ -237,14 +241,14 @@ class PornHub(context: Context) : MainAPI() {
             imgsrc?.attr("src") ?: imgsrc?.attr("data-src") ?: imgsrc?.attr("data-mediabook")
             ?: imgsrc?.attr("alt") ?: imgsrc?.attr("data-mediumthumb")
             ?: imgsrc?.attr("data-thumb_url")
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
 
     private fun setSort(httpUrl: HttpUrl): HttpUrl {
         val nsfwFilters = getNSFWFilters(sharedPref)
-        val sorting = nsfwFilters.homeSearchSort ?: emptyList()
+        val sorting = nsfwFilters.homeSearchSort
         val builder = httpUrl.newBuilder()
         when {
             sorting.contains("daily") -> {
