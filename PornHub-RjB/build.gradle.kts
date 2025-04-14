@@ -1,10 +1,10 @@
 // use an integer for version numbers
-version = 8
+version = 3
 
 cloudstream {
     // All of these properties are optional, you can safely remove them
 
-    description = "Pornhub RjB"
+    description = "PornHub-RjB"
     authors = listOf("Stormunblessed", "Jace", "KillerDogeEmpire", "Hexated", "RjB (Coxju)")
 
     /**

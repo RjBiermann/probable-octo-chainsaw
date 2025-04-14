@@ -35,7 +35,7 @@ import org.jsoup.nodes.Element
 class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
     private val globalTvType = TvType.NSFW
     override var mainUrl = "https://www.pornhub.com"
-    override var name = "PornHub"
+    override var name = "PornHub-RjB"
     override val hasMainPage = true
     override var lang = "en"
     override val hasQuickSearch = false
