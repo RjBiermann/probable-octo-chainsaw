@@ -6,4 +6,4 @@ const val MAX_DURATION = "maxDuration"
 const val HOME_SEARCH_STRING = "homeSearchString"
 const val HOME_SEARCH_SORT = "homeSearchSort"
 
-const val NSFWFiltersKey = "NSFWFiltersV2"
+const val NSFWFiltersKey = "NSFWFilters"

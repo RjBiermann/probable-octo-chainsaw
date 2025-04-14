@@ -8,7 +8,7 @@ const val MAX_DURATION = "maxDuration"
 const val HOME_SEARCH_STRING = "homeSearchString"
 const val HOME_SEARCH_SORT = "homeSearchSort"
 
-const val NSFWFiltersKey = "NSFWFiltersV2"
+const val NSFWFiltersKey = "NSFWFilters"
 
 data class NSFWFilters(
     val hdOnly: Boolean,
@@ -19,11 +19,25 @@ data class NSFWFilters(
 )
 
 fun getNSFWFilters(sharedPref: SharedPreferences): NSFWFilters {
+    try {
+        return NSFWFilters(
+            sharedPref.getBoolean(HD_ONLY, false),
+            sharedPref.getInt(MIN_DURATION, 0),
+            sharedPref.getInt(MAX_DURATION, 0),
+            sharedPref.getString(HOME_SEARCH_STRING, "") ?: "",
+            sharedPref.getString(HOME_SEARCH_SORT, "") ?: ""
+        )
+    } catch (_: Exception) {
+        sharedPref.edit().apply {
+            clear()
+            commit()
+        }
+    }
     return NSFWFilters(
-        sharedPref.getBoolean(HD_ONLY,false),
-        sharedPref.getInt(MIN_DURATION,0),
-        sharedPref.getInt(MAX_DURATION,0),
-        sharedPref.getString(HOME_SEARCH_STRING,"")?:"",
-        sharedPref.getString(HOME_SEARCH_SORT,"")?:""
+        sharedPref.getBoolean(HD_ONLY, false),
+        sharedPref.getInt(MIN_DURATION, 0),
+        sharedPref.getInt(MAX_DURATION, 0),
+        sharedPref.getString(HOME_SEARCH_STRING, "") ?: "",
+        sharedPref.getString(HOME_SEARCH_SORT, "") ?: ""
     )
 }

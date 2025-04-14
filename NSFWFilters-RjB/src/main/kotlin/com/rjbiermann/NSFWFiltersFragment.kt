@@ -79,20 +79,24 @@ class NSFWFiltersFragment(
         searchSortHintTextView.text = getString("search_sorting_all")
         disclaimerTextView.text = getString("disclaimer")
 
-        // Initialize from preference
-        if (sharedPref.getInt(MIN_DURATION, 0) != 0) {
-            minDurationEditText.setText(sharedPref.getInt(MIN_DURATION, 0).toString())
+        try {
+            // Initialize from preference
+            if (sharedPref.getInt(MIN_DURATION, 0) != 0) {
+                minDurationEditText.setText(sharedPref.getInt(MIN_DURATION, 0).toString())
+            }
+            if (sharedPref.getInt(MAX_DURATION, 0) != 0) {
+                maxDurationEditText.setText(sharedPref.getInt(MAX_DURATION, 0).toString())
+            }
+            searchHomeEditText.setText(
+                sharedPref.getString(HOME_SEARCH_STRING, "")
+            )
+            hdOnlySwitch.isChecked = sharedPref.getBoolean(HD_ONLY, false)
+            addSearchHomeSortEditText.setText(
+                sharedPref.getString(HOME_SEARCH_SORT, "")
+            )
+        } catch (_: Exception) {
+            clearFilters()
         }
-        if (sharedPref.getInt(MAX_DURATION, 0) != 0) {
-            maxDurationEditText.setText(sharedPref.getInt(MAX_DURATION, 0).toString())
-        }
-        searchHomeEditText.setText(
-            sharedPref.getString(HOME_SEARCH_STRING, "")
-        )
-        hdOnlySwitch.isChecked = sharedPref.getBoolean(HD_ONLY, false)
-        addSearchHomeSortEditText.setText(
-            sharedPref.getString(HOME_SEARCH_SORT, "")
-        )
 
         // Handle save_button button
         saveButton.setOnClickListener {
@@ -101,14 +105,12 @@ class NSFWFiltersFragment(
                 putInt(MIN_DURATION, minDurationEditText.text.toString().trim().toIntOrNull() ?: 0)
                 putInt(MAX_DURATION, maxDurationEditText.text.toString().trim().toIntOrNull() ?: 0)
                 putString(
-                    HOME_SEARCH_STRING,
-                    searchHomeEditText.text.toString()
+                    HOME_SEARCH_STRING, searchHomeEditText.text.toString()
                 )
                 putString(
-                    HOME_SEARCH_SORT,
-                    addSearchHomeSortEditText.text.toString()
+                    HOME_SEARCH_SORT, addSearchHomeSortEditText.text.toString()
                 )
-                apply()
+                commit()
             }
             showToast(getString("saved_toast"))
             dismiss()
@@ -116,12 +118,16 @@ class NSFWFiltersFragment(
 
         // Handle clear_button
         clearButton.setOnClickListener {
-            sharedPref.edit().apply {
-                clear()
-                apply()
-            }
-            showToast(getString("cleared_toast"))
-            dismiss()
+            clearFilters()
         }
+    }
+
+    private fun clearFilters() {
+        sharedPref.edit().apply {
+            clear()
+            commit()
+        }
+        showToast(getString("cleared_toast"))
+        dismiss()
     }
 }

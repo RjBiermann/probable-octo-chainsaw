@@ -3,7 +3,6 @@ package com.rjbiermann
 import android.content.SharedPreferences
 import android.util.Log
 import com.lagradost.cloudstream3.APIHolder.capitalize
-import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.HomePageList
 import com.lagradost.cloudstream3.HomePageResponse
 import com.lagradost.cloudstream3.LoadResponse
@@ -19,7 +18,6 @@ import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.fixUrl
 import com.lagradost.cloudstream3.fixUrlNull
 import com.lagradost.cloudstream3.mainPageOf
-import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newMovieLoadResponse
 import com.lagradost.cloudstream3.newMovieSearchResponse
@@ -27,6 +25,8 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.getQualityFromName
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import kotlinx.coroutines.runBlocking
+import me.xdrop.fuzzywuzzy.FuzzySearch
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONObject
@@ -46,22 +46,86 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
 
     val nsfwFilters = getNSFWFilters(sharedPref)
 
+    var categoriesMap: List<Pair<String, String>> = emptyList()
+
+    var categoriesFound: MutableList<String> = mutableListOf()
+
+    private val cookies = mapOf(Pair("hasVisited", "1"), Pair("accessAgeDisclaimerPH", "1"))
+
+    val categoriesHome = runBlocking {
+        val soup = app.get("$mainUrl/categories", cookies = cookies).document
+
+        categoriesMap =
+            if (categoriesMap.isEmpty()) soup.select("ul.categoriesListSection li.catPic")
+                .mapNotNull { category ->
+                    val categoryName =
+                        category.selectFirst("span.categoryTitleWrapper a strong")?.text() ?: ""
+                    val categoryId = category.attr("data-category").toString()
+                    categoryId to categoryName
+                }.filter { it.second.isNotEmpty() || it.first.isNotEmpty() }
+            else categoriesMap
+
+        return@runBlocking nsfwFilters.homeSearch.split(",")
+            .filter { search -> search.isNotBlank() }.map { search ->
+                try {
+                    if (!search.contains("+")) {
+                        val category = categoriesMap.first {
+                            FuzzySearch.partialRatio(
+                                it.second, search
+                            ) >= 80
+                        }
+                        val url = "$mainUrl/video".toHttpUrl().newBuilder()
+                        val categoryUrl =
+                            url.setQueryParameter("c", category.first).build().toString()
+                        categoriesFound.add(search)
+                        setSort(
+                            categoryUrl.toString().toHttpUrl()
+                        ).toString() to category.second.capitalize() + " Category"
+                    } else {
+                        val categories = Pair(search.split("+")[0], search.split("+")[1])
+                        val categoryFirst = categoriesMap.first {
+                            FuzzySearch.partialRatio(
+                                it.second, categories.first
+                            ) >= 80
+                        }
+                        val categorySecond = categoriesMap.first {
+                            FuzzySearch.partialRatio(
+                                it.second, categories.second
+                            ) >= 80
+                        }
+                        val categoryFirstSlug = categoryFirst.second.lowercase()
+                            .filter { it.isLetterOrDigit() || it.isWhitespace() }.replace(" ", "-")
+                        val categorySecondSlug = categorySecond.second.lowercase()
+                            .filter { it.isLetterOrDigit() || it.isWhitespace() }.replace(" ", "-")
+
+                        val url =
+                            "$mainUrl/video/incategories/${categoryFirstSlug}/${categorySecondSlug}".toHttpUrl()
+
+                        categoriesFound.add(search)
+                        setSort(
+                            url
+                        ).toString() to categoryFirst.second.capitalize() + " + " + categorySecond.second.capitalize() + " Category"
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }.mapNotNull { it }.toTypedArray()
+    }
+
     val homeSearch = nsfwFilters.homeSearch.split(",").filter { search -> search.isNotBlank() }
-        .map { search ->
-            val url = "$mainUrl/video/search"
-            val httpUrl = url.toHttpUrl()
-            val builder = httpUrl.newBuilder()
-            builder.setQueryParameter("search", search.replace(" ", "+"))
-            setSort(builder.toString().toHttpUrl()).toString() to search.capitalize()
+        .filter { !categoriesFound.contains(it) }.map { search ->
+            val url = "$mainUrl/video/search".toHttpUrl().newBuilder()
+            url.setQueryParameter("search", search.replace(" ", "+"))
+            setSort(url.toString().toHttpUrl()).toString() to search.capitalize()
         }.toTypedArray()
 
     override val mainPage = mainPageOf(
         "$mainUrl/video" to "Recently Featured ",
         "$mainUrl/video?o=mv" to "This Week's Most Viewed",
         "$mainUrl/video?o=tr&t=w" to "This Week's Top Rated",
-        *homeSearch
+        *homeSearch,
+        *categoriesHome
     )
-    private val cookies = mapOf(Pair("hasVisited", "1"), Pair("accessAgeDisclaimerPH", "1"))
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         try {
@@ -77,7 +141,7 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
                     "div.sectionWrapper div.noVideosNotice"
                 ).isNotEmpty()
             ) {
-                throw ErrorLoadingException("No homepage data found!")
+                return newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
             }
 
             val home = soup.select("div.sectionWrapper div.wrap")
@@ -103,12 +167,12 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
                     ), hasNext = true
                 )
             } else {
-                throw ErrorLoadingException("No homepage data found!")
+                return newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
             }
         } catch (e: Exception) {
-            logError(e)
+            return newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
         }
-        throw ErrorLoadingException()
+        return newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -265,6 +329,10 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
 
             sorting.contains("yearly") -> {
                 builder.setQueryParameter("t", "y")
+            }
+
+            sorting.contains("all") -> {
+                builder.setQueryParameter("o", "a")
             }
         }
 

@@ -79,8 +79,11 @@ subprojects {
         // but you don't need to include any of them if you don't need them.
         // https://github.com/recloudstream/cloudstream/blob/master/app/build.gradle.kts
         implementation(kotlin("stdlib")) // Adds Standard Kotlin Features
-        implementation("com.github.Blatzar:NiceHttp:0.4.11") // HTTP Lib
+        implementation("com.github.Blatzar:NiceHttp:0.4.13") // HTTP Lib
         implementation("org.jsoup:jsoup:1.18.3") // HTML Parser
+
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
+        implementation("me.xdrop:fuzzywuzzy:1.4.0")
     }
 }
 
