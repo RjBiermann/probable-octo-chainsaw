@@ -118,8 +118,8 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
         val response = mutableListOf<SearchResponse>()
         for (i in 1..5) {
             val url = "$mainUrl/video/search"
-            val urlForCategory = getUrlPairForCategory(query)
-            var httpUrl = if (query.contains("+") && urlForCategory != null) {
+            val urlForCategory = if(query.contains("+")) getUrlPairForCategory(query) else null
+            var httpUrl = if (urlForCategory != null) {
                 setSort(buildURL(urlForCategory.first.toHttpUrl(), i, null))
             } else {
                 setSort(buildURL(url.toHttpUrl(), i, query))
