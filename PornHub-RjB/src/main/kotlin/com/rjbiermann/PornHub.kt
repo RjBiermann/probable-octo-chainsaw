@@ -44,80 +44,19 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
     override val supportedTypes = setOf(TvType.NSFW)
     override val vpnStatus = VPNStatus.MightBeNeeded
 
-    val nsfwFilters = getNSFWFilters(sharedPref)
+    private val cookies = mapOf(Pair("hasVisited", "1"), Pair("accessAgeDisclaimerPH", "1"))
 
-    var categoriesMap: List<Pair<String, String>> = emptyList()
+    val categoriesMap: List<Pair<String, String>> = runBlocking {
+        getAllCategories()
+    }
+
+    val nsfwFilters = getNSFWFilters(sharedPref)
 
     var categoriesFound: MutableList<String> = mutableListOf()
 
-    private val cookies = mapOf(Pair("hasVisited", "1"), Pair("accessAgeDisclaimerPH", "1"))
+    val categoriesHome = getAllCategoriesHome()
 
-    val categoriesHome = runBlocking {
-        val soup = app.get("$mainUrl/categories", cookies = cookies).document
-
-        categoriesMap =
-            if (categoriesMap.isEmpty()) soup.select("ul.categoriesListSection li.catPic")
-                .mapNotNull { category ->
-                    val categoryName =
-                        category.selectFirst("span.categoryTitleWrapper a strong")?.text() ?: ""
-                    val categoryId = category.attr("data-category").toString()
-                    categoryId to categoryName
-                }.filter { it.second.isNotEmpty() || it.first.isNotEmpty() }
-            else categoriesMap
-
-        return@runBlocking nsfwFilters.homeSearch.split(",")
-            .filter { search -> search.isNotBlank() }.map { search ->
-                try {
-                    if (!search.contains("+")) {
-                        val category = categoriesMap.first {
-                            FuzzySearch.partialRatio(
-                                it.second, search
-                            ) >= 80
-                        }
-                        val url = "$mainUrl/video".toHttpUrl().newBuilder()
-                        val categoryUrl =
-                            url.setQueryParameter("c", category.first).build().toString()
-                        categoriesFound.add(search)
-                        setSort(
-                            categoryUrl.toString().toHttpUrl()
-                        ).toString() to category.second.capitalize() + " Category"
-                    } else {
-                        val categories = Pair(search.split("+")[0], search.split("+")[1])
-                        val categoryFirst = categoriesMap.first {
-                            FuzzySearch.partialRatio(
-                                it.second, categories.first
-                            ) >= 80
-                        }
-                        val categorySecond = categoriesMap.first {
-                            FuzzySearch.partialRatio(
-                                it.second, categories.second
-                            ) >= 80
-                        }
-                        val categoryFirstSlug = categoryFirst.second.lowercase()
-                            .filter { it.isLetterOrDigit() || it.isWhitespace() }.replace(" ", "-")
-                        val categorySecondSlug = categorySecond.second.lowercase()
-                            .filter { it.isLetterOrDigit() || it.isWhitespace() }.replace(" ", "-")
-
-                        val url =
-                            "$mainUrl/video/incategories/${categoryFirstSlug}/${categorySecondSlug}".toHttpUrl()
-
-                        categoriesFound.add(search)
-                        setSort(
-                            url
-                        ).toString() to categoryFirst.second.capitalize() + " + " + categorySecond.second.capitalize() + " Category"
-                    }
-                } catch (_: Exception) {
-                    null
-                }
-            }.mapNotNull { it }.toTypedArray()
-    }
-
-    val homeSearch = nsfwFilters.homeSearch.split(",").filter { search -> search.isNotBlank() }
-        .filter { !categoriesFound.contains(it) }.map { search ->
-            val url = "$mainUrl/video/search".toHttpUrl().newBuilder()
-            url.setQueryParameter("search", search.replace(" ", "+"))
-            setSort(url.toString().toHttpUrl()).toString() to search.capitalize()
-        }.toTypedArray()
+    val homeSearch = getAllHomeSearch()
 
     override val mainPage = mainPageOf(
         "$mainUrl/video" to "Recently Featured ",
@@ -179,8 +118,12 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
         val response = mutableListOf<SearchResponse>()
         for (i in 1..5) {
             val url = "$mainUrl/video/search"
-            var httpUrl = buildURL(url.toHttpUrl(), i, query)
-            httpUrl = setSort(httpUrl)
+            val urlForCategory = getUrlPairForCategory(query)
+            var httpUrl = if (query.contains("+") && urlForCategory != null) {
+                setSort(buildURL(urlForCategory.first.toHttpUrl(), i, null))
+            } else {
+                setSort(buildURL(url.toHttpUrl(), i, query))
+            }
             Log.d("pornhub", httpUrl.toString())
             val document = app.get(httpUrl.toString(), cookies = cookies).document
             if (document.select("div.noResultsWrapper div#noResultBigText")
@@ -376,4 +319,117 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
         }
         return builder.build()
     }
+
+
+    private fun getUrlPairForCategory(search: String): Pair<String, String>? {
+        val categories = Pair(search.split("+")[0], search.split("+")[1])
+        val categoryFirst = categoriesMap.firstOrNull {
+            FuzzySearch.partialRatio(
+                it.second, categories.first
+            ) >= 80
+        }
+        val categorySecond = categoriesMap.firstOrNull {
+            FuzzySearch.partialRatio(
+                it.second, categories.second
+            ) >= 80
+        }
+        return when {
+            categoryFirst != null && categorySecond == null -> {
+                categoriesFound.add(search)
+                getUrlPairForSingleCategoryAndSearch(
+                    categories.second, categoryFirst.second, categoryFirst.first
+                )
+            }
+
+            categoryFirst == null && categorySecond != null -> {
+                categoriesFound.add(search)
+                getUrlPairForSingleCategoryAndSearch(
+                    categories.first, categorySecond.second, categorySecond.first
+                )
+            }
+
+            categoryFirst != null && categorySecond != null -> {
+                categoriesFound.add(search)
+                getUrlPairForTwoCategories(categoryFirst, categorySecond)
+            }
+
+            else -> {
+                null
+            }
+        }
+    }
+
+    private fun getUrlPairForTwoCategories(
+        categoryFirst: Pair<String, String>, categorySecond: Pair<String, String>
+    ): Pair<String, String> {
+        val categoryFirstSlug =
+            categoryFirst.second.lowercase().filter { it.isLetterOrDigit() || it.isWhitespace() }
+                .replace(" ", "-")
+        val categorySecondSlug =
+            categorySecond.second.lowercase().filter { it.isLetterOrDigit() || it.isWhitespace() }
+                .replace(" ", "-")
+
+        val url =
+            "$mainUrl/video/incategories/${categoryFirstSlug}/${categorySecondSlug}".toHttpUrl()
+
+        return setSort(
+            url
+        ).toString() to categoryFirst.second.capitalize() + " + " + categorySecond.second.capitalize() + " Category"
+    }
+
+    private fun getUrlPairForSingleCategoryAndSearch(
+        search: String, category: String, categoryId: String
+    ): Pair<String, String> {
+        val url = "$mainUrl/video/search".toHttpUrl().newBuilder()
+        url.setQueryParameter("search", search.replace(" ", "+"))
+        url.setQueryParameter("filter_category", categoryId)
+
+        return setSort(
+            url.toString().toHttpUrl()
+        ).toString() to search.capitalize() + " + " + category.capitalize() + " Category"
+    }
+
+    private fun getUrlPairForSingleCategory(search: String): Pair<String, String> {
+        val category = categoriesMap.first {
+            FuzzySearch.partialRatio(
+                it.second, search
+            ) >= 80
+        }
+        val url = "$mainUrl/video".toHttpUrl().newBuilder()
+        val categoryUrl = url.setQueryParameter("c", category.first).build().toString()
+        categoriesFound.add(search)
+        return setSort(
+            categoryUrl.toString().toHttpUrl()
+        ).toString() to category.second.capitalize() + " Category"
+    }
+
+    private fun getAllCategoriesHome(): Array<Pair<String, String>> {
+        return nsfwFilters.homeSearch.split(",").filter { search -> search.isNotBlank() }
+            .map { search ->
+                if (!search.contains("+")) {
+                    getUrlPairForSingleCategory(search)
+                } else {
+                    getUrlPairForCategory(search)
+                }
+            }.mapNotNull { it }.toTypedArray()
+    }
+
+    private suspend fun getAllCategories(): List<Pair<String, String>> {
+        val soup = app.get("$mainUrl/categories", cookies = cookies).document
+
+        return soup.select("ul.categoriesListSection li.catPic").mapNotNull { category ->
+            val categoryName =
+                category.selectFirst("span.categoryTitleWrapper a strong")?.text() ?: ""
+            val categoryId = category.attr("data-category").toString()
+            categoryId to categoryName
+        }.filter { it.second.isNotEmpty() || it.first.isNotEmpty() }
+    }
+
+    private fun getAllHomeSearch(): Array<Pair<String, String>> =
+        nsfwFilters.homeSearch.split(",").filter { search -> search.isNotBlank() }
+            .filter { !categoriesFound.contains(it) }.map { search ->
+                val url = "$mainUrl/video/search".toHttpUrl().newBuilder()
+                url.setQueryParameter("search", search.replace(" ", "+"))
+                setSort(url.toString().toHttpUrl()).toString() to search.capitalize()
+            }.toTypedArray()
 }
