@@ -47,7 +47,11 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
     private val cookies = mapOf(Pair("hasVisited", "1"), Pair("accessAgeDisclaimerPH", "1"))
 
     val categoriesMap: List<Pair<String, String>> = runBlocking {
-        getAllCategories()
+        try {
+            getAllCategories()
+        } catch (_: Exception) {
+            listOf<Pair<String, String>>()
+        }
     }
 
     val nsfwFilters = getNSFWFilters(sharedPref)
@@ -99,16 +103,16 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
                     }
                 }
             home.distinctBy { item -> item.url }
-            if (home.isNotEmpty()) {
-                return newHomePageResponse(
+            return if (home.isNotEmpty()) {
+                newHomePageResponse(
                     list = HomePageList(
                         name = categoryName, list = home, isHorizontalImages = true
                     ), hasNext = true
                 )
             } else {
-                return newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
+                newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
         }
         return newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
@@ -118,7 +122,7 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
         val response = mutableListOf<SearchResponse>()
         for (i in 1..5) {
             val url = "$mainUrl/video/search"
-            val urlForCategory = if(query.contains("+")) getUrlPairForCategory(query) else null
+            val urlForCategory = if (query.contains("+")) getUrlPairForCategory(query) else null
             var httpUrl = if (urlForCategory != null) {
                 setSort(buildURL(urlForCategory.first.toHttpUrl(), i, null))
             } else {
@@ -389,12 +393,13 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
         ).toString() to search.capitalize() + " + " + category.capitalize() + " Category"
     }
 
-    private fun getUrlPairForSingleCategory(search: String): Pair<String, String> {
-        val category = categoriesMap.first {
+    private fun getUrlPairForSingleCategory(search: String): Pair<String, String>? {
+        val category = categoriesMap.firstOrNull {
             FuzzySearch.partialRatio(
                 it.second.lowercase(), search.lowercase()
             ) >= 90
         }
+        if (category == null) return null
         val url = "$mainUrl/video".toHttpUrl().newBuilder()
         val categoryUrl = url.setQueryParameter("c", category.first).build().toString()
         categoriesFound.add(search)
