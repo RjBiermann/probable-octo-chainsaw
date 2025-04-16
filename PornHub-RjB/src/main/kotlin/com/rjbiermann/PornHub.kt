@@ -325,13 +325,13 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
         val categories = Pair(search.split("+")[0], search.split("+")[1])
         val categoryFirst = categoriesMap.firstOrNull {
             FuzzySearch.partialRatio(
-                it.second, categories.first
-            ) >= 80
+                it.second.lowercase(), categories.first.lowercase()
+            ) >= 90
         }
         val categorySecond = categoriesMap.firstOrNull {
             FuzzySearch.partialRatio(
-                it.second, categories.second
-            ) >= 80
+                it.second.lowercase(), categories.second.lowercase()
+            ) >= 90
         }
         return when {
             categoryFirst != null && categorySecond == null -> {
@@ -392,8 +392,8 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
     private fun getUrlPairForSingleCategory(search: String): Pair<String, String> {
         val category = categoriesMap.first {
             FuzzySearch.partialRatio(
-                it.second, search
-            ) >= 80
+                it.second.lowercase(), search.lowercase()
+            ) >= 90
         }
         val url = "$mainUrl/video".toHttpUrl().newBuilder()
         val categoryUrl = url.setQueryParameter("c", category.first).build().toString()
