@@ -6,7 +6,7 @@
     android:gravity="center_horizontal"
     android:orientation="vertical"
     android:padding="20dp"
-    tools:context="com.rjbiermann.NSFWFiltersFragment">
+    tools:context=".NSFWFiltersFragment">
 
     <TextView
         android:id="@+id/disclaimerText"
@@ -72,8 +72,9 @@
         android:layout_height="wrap_content"
         android:layout_marginBottom="15dp"
         android:ems="10"
+        android:gravity="start|top"
         android:hint="@string/add_search_home_hint"
-        android:inputType="text" />
+        android:inputType="textMultiLine" />
 
     <TextView
         android:id="@+id/searchSort"

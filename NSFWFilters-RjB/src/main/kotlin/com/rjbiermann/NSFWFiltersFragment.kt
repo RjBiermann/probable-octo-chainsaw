@@ -18,20 +18,22 @@ import com.lagradost.cloudstream3.CommonActivity.showToast
 class NSFWFiltersFragment(
     val plugin: TestPlugin, private val sharedPref: SharedPreferences
 ) : BottomSheetDialogFragment() {
+    private val res = plugin.resources ?: throw Exception("Unable to read resources")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
     }
 
     private fun getString(name: String): String? {
-        val id = plugin.resources!!.getIdentifier(
-            name, "string", recloudstream.BuildConfig.LIBRARY_PACKAGE_NAME
+        val id = res.getIdentifier(
+            name, "string", BuildConfig.LIBRARY_PACKAGE_NAME
         )
-        return plugin.resources!!.getString(id)
+        return res.getString(id)
     }
 
     private fun <T : View> View.findView(name: String): T {
-        val id = plugin.resources!!.getIdentifier(
-            name, "id", recloudstream.BuildConfig.LIBRARY_PACKAGE_NAME
+        val id = res.getIdentifier(
+            name, "id", BuildConfig.LIBRARY_PACKAGE_NAME
         )
         return this.findViewById(id)
     }
@@ -40,12 +42,12 @@ class NSFWFiltersFragment(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View? {
         // Inflate the layout for this fragment
-        val id = plugin.resources!!.getIdentifier(
-            "fragment_nsfw_filters", "layout", recloudstream.BuildConfig.LIBRARY_PACKAGE_NAME
+        val id = res.getIdentifier(
+            "fragment_nsfw_filters", "layout", BuildConfig.LIBRARY_PACKAGE_NAME
         )
         Log.d("NSFWFilters", id.toString())
-        Log.d("NSFWFilters", recloudstream.BuildConfig.LIBRARY_PACKAGE_NAME)
-        val layout = plugin.resources!!.getLayout(id)
+        Log.d("NSFWFilters", BuildConfig.LIBRARY_PACKAGE_NAME)
+        val layout = res.getLayout(id)
         return inflater.inflate(layout, container, false)
     }
 

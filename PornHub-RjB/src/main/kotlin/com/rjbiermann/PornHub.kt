@@ -32,6 +32,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 
+data class Category(val id: String, val name: String, val url: String)
+
 class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
     private val globalTvType = TvType.NSFW
     override var mainUrl = "https://www.pornhub.com"
@@ -46,11 +48,11 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
 
     private val cookies = mapOf(Pair("hasVisited", "1"), Pair("accessAgeDisclaimerPH", "1"))
 
-    val categoriesMap: List<Pair<String, String>> = runBlocking {
+    val categoriesMap: List<Category> = runBlocking {
         try {
             getAllCategories()
         } catch (_: Exception) {
-            listOf<Pair<String, String>>()
+            listOf<Category>()
         }
     }
 
@@ -328,27 +330,29 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
     private fun getUrlPairForCategory(search: String): Pair<String, String>? {
         val categories = Pair(search.split("+")[0], search.split("+")[1])
         val categoryFirst = categoriesMap.firstOrNull {
-            FuzzySearch.partialRatio(
-                it.second.lowercase(), categories.first.lowercase()
-            ) >= 90
+            FuzzySearch.ratio(
+                it.name.lowercase().replace("\n", "").trim(),
+                categories.first.lowercase().replace("\n", "").trim()
+            ) >= 80
         }
         val categorySecond = categoriesMap.firstOrNull {
-            FuzzySearch.partialRatio(
-                it.second.lowercase(), categories.second.lowercase()
-            ) >= 90
+            FuzzySearch.ratio(
+                it.name.lowercase().replace("\n", "").trim(),
+                categories.second.lowercase().replace("\n", "").trim()
+            ) >= 80
         }
         return when {
             categoryFirst != null && categorySecond == null -> {
                 categoriesFound.add(search)
                 getUrlPairForSingleCategoryAndSearch(
-                    categories.second, categoryFirst.second, categoryFirst.first
+                    categories.second, categoryFirst.name, categoryFirst.id
                 )
             }
 
             categoryFirst == null && categorySecond != null -> {
                 categoriesFound.add(search)
                 getUrlPairForSingleCategoryAndSearch(
-                    categories.first, categorySecond.second, categorySecond.first
+                    categories.first, categorySecond.name, categorySecond.id
                 )
             }
 
@@ -364,13 +368,13 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
     }
 
     private fun getUrlPairForTwoCategories(
-        categoryFirst: Pair<String, String>, categorySecond: Pair<String, String>
+        categoryFirst: Category, categorySecond: Category
     ): Pair<String, String> {
         val categoryFirstSlug =
-            categoryFirst.second.lowercase().filter { it.isLetterOrDigit() || it.isWhitespace() }
+            categoryFirst.name.lowercase().filter { it.isLetterOrDigit() || it.isWhitespace() }
                 .replace(" ", "-")
         val categorySecondSlug =
-            categorySecond.second.lowercase().filter { it.isLetterOrDigit() || it.isWhitespace() }
+            categorySecond.name.lowercase().filter { it.isLetterOrDigit() || it.isWhitespace() }
                 .replace(" ", "-")
 
         val url =
@@ -378,7 +382,7 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
 
         return setSort(
             url
-        ).toString() to categoryFirst.second.capitalize() + " + " + categorySecond.second.capitalize() + " Category"
+        ).toString() to categoryFirst.name.capitalize() + " + " + categorySecond.name.capitalize() + " Category"
     }
 
     private fun getUrlPairForSingleCategoryAndSearch(
@@ -395,17 +399,18 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
 
     private fun getUrlPairForSingleCategory(search: String): Pair<String, String>? {
         val category = categoriesMap.firstOrNull {
-            FuzzySearch.partialRatio(
-                it.second.lowercase(), search.lowercase()
-            ) >= 90
+            FuzzySearch.ratio(
+                it.name.lowercase().replace("\n", "").trim(),
+                search.lowercase().replace("\n", "").trim()
+            ) >= 80
         }
         if (category == null) return null
         val url = "$mainUrl/video".toHttpUrl().newBuilder()
-        val categoryUrl = url.setQueryParameter("c", category.first).build().toString()
+        val categoryUrl = url.setQueryParameter("c", category.id).build().toString()
         categoriesFound.add(search)
         return setSort(
             categoryUrl.toString().toHttpUrl()
-        ).toString() to category.second.capitalize() + " Category"
+        ).toString() to category.name.capitalize() + " Category"
     }
 
     private fun getAllCategoriesHome(): Array<Pair<String, String>> {
@@ -419,15 +424,16 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
             }.mapNotNull { it }.toTypedArray()
     }
 
-    private suspend fun getAllCategories(): List<Pair<String, String>> {
+    private suspend fun getAllCategories(): List<Category> {
         val soup = app.get("$mainUrl/categories", cookies = cookies).document
 
         return soup.select("ul.categoriesListSection li.catPic").mapNotNull { category ->
             val categoryName =
                 category.selectFirst("span.categoryTitleWrapper a strong")?.text() ?: ""
+            val link = category.selectFirst("span.categoryTitleWrapper a")?.attr("href") ?: ""
             val categoryId = category.attr("data-category").toString()
-            categoryId to categoryName
-        }.filter { it.second.isNotEmpty() || it.first.isNotEmpty() }
+            Category(categoryId, categoryName, link)
+        }.filter { it.id.isNotEmpty() || it.url.isNotEmpty() || it.name.isNotEmpty() }
     }
 
     private fun getAllHomeSearch(): Array<Pair<String, String>> =

@@ -2,9 +2,12 @@ dependencies {
     implementation("androidx.legacy:legacy-support-v4:1.0.0")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
+    val cloudstream by configurations
+
+    cloudstream("com.lagradost:cloudstream3:pre-release")
 }
 // use an integer for version numbers
-version = 4
+version = 5
 
 
 cloudstream {
@@ -25,6 +28,7 @@ cloudstream {
     tvTypes = listOf("NSFW")
 
     requiresResources = true
+    isCrossPlatform = false
     language = "en"
 
     // random cc logo i found
@@ -35,5 +39,8 @@ android {
     buildFeatures {
         viewBinding = true
         buildConfig = true
+    }
+    defaultConfig {
+        android.buildFeatures.buildConfig = true
     }
 }

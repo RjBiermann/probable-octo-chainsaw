@@ -43,7 +43,7 @@ subprojects {
     }
 
     android {
-        namespace = "recloudstream"
+        namespace = "com.rjbiermann"
 
         defaultConfig {
             minSdk = 21

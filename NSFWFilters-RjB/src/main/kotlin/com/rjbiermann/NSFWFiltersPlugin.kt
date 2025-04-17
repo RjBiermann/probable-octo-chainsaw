@@ -7,15 +7,13 @@ import com.lagradost.cloudstream3.plugins.Plugin
 
 @CloudstreamPlugin
 class TestPlugin : Plugin() {
-    var activity: AppCompatActivity? = null
-
     override fun load(context: Context) {
         val sharedPref = context.getSharedPreferences(NSFWFiltersKey, Context.MODE_PRIVATE)
-        activity = context as AppCompatActivity
+        val activity = context as AppCompatActivity
 
         openSettings = {
             val frag = NSFWFiltersFragment(this, sharedPref)
-            frag.show(activity!!.supportFragmentManager, "Frag")
+            frag.show(activity.supportFragmentManager, "Frag")
         }
     }
 }
