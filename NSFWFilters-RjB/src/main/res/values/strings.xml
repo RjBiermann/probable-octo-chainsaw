@@ -9,7 +9,7 @@
     <string name="add_search_home">Add search and category feed to home (App restart might be needed)</string>
     <string name="add_search_home_hint">Comma separated phrases</string>
     <string name="search_sorting">Sorting (Applied for home search feed and main search)</string>
-    <string name="search_sorting_all">relevant(default), recent, viewed, rated, longest, daily, weekly, monthly, yearly, all(default)</string>
+    <string name="search_sorting_all">relevant(default), recent, viewed, rated, longest, daily, weekly, monthly, yearly, all(default), homemade, professional</string>
     <string name="search_sorting_hint">Ex. viewed,daily OR rated,yearly OR recent</string>
     <string name="clear_button">Clear</string>
     <string name="cleared_toast">Filters cleared</string>

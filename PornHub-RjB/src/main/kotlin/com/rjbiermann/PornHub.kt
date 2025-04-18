@@ -86,6 +86,7 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
                     "div.sectionWrapper div.noVideosNotice"
                 ).isNotEmpty()
             ) {
+                Log.d("pornhub","no result error")
                 return newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
             }
 
@@ -112,11 +113,14 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
                     ), hasNext = true
                 )
             } else {
+                Log.d("pornhub","no result empty")
                 newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
             }
         } catch (_: Exception) {
+            Log.d("pornhub","no result exception")
             return newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
         }
+        Log.d("pornhub","no result end")
         return newHomePageResponse(emptyList<HomePageList>(), hasNext = false)
     }
 
@@ -169,7 +173,7 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
         val tags = soup.select("div.categoriesWrapper a")
             .map { it?.text()?.trim().toString().replace(", ", "") }
 
-        val recommendations = soup.select("ul#recommendedVideos li.pcVideoListItem").map {
+        val recommendations = soup.select("ul#recommendedVideosListing li.pcVideoListItem").map {
             val rTitle = it.selectFirst("div.phimage a")?.attr("title") ?: ""
             val rUrl = fixUrl(it.selectFirst("div.phimage a")?.attr("href").toString())
             val rPoster = fixUrl(
@@ -186,7 +190,7 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
             soup.select("div.video-wrapper div.video-info-row.userRow div.userInfo div.usernameWrap a")
                 .map { it.text() }
 
-        val relatedVideo = soup.select("ul#relatedVideosCenter li.pcVideoListItem").map {
+        val relatedVideo = soup.select("ul#relatedVideosListing li.pcVideoListItem").map {
             val rTitle = it.selectFirst("div.phimage a")?.attr("title") ?: ""
             val rUrl = fixUrl(it.selectFirst("div.phimage a")?.attr("href").toString())
             val rPoster = fixUrl(
@@ -302,6 +306,16 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
                 builder.setQueryParameter("o", "tl")
             }
         }
+
+        when {
+            sorting.contains("homemade") -> {
+                builder.setQueryParameter("p", "homemade")
+            }
+
+            sorting.contains("professional") -> {
+                builder.setQueryParameter("p", "professional")
+            }
+        }
         return builder.build()
     }
 
@@ -328,17 +342,17 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
 
 
     private fun getUrlPairForCategory(search: String): Pair<String, String>? {
-        val categories = Pair(search.split("+")[0], search.split("+")[1])
+        val categories = Pair(search.splitter("+").getOrElse(0){""}, search.splitter("+").getOrElse(1){""})
         val categoryFirst = categoriesMap.firstOrNull {
             FuzzySearch.ratio(
-                it.name.lowercase().replace("\n", "").trim(),
-                categories.first.lowercase().replace("\n", "").trim()
+                it.name.lowercase().replace("\n", ""),
+                categories.first.lowercase().replace("\n", "")
             ) >= 80
         }
         val categorySecond = categoriesMap.firstOrNull {
             FuzzySearch.ratio(
-                it.name.lowercase().replace("\n", "").trim(),
-                categories.second.lowercase().replace("\n", "").trim()
+                it.name.lowercase().replace("\n", ""),
+                categories.second.lowercase().replace("\n", "")
             ) >= 80
         }
         return when {
@@ -400,8 +414,8 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
     private fun getUrlPairForSingleCategory(search: String): Pair<String, String>? {
         val category = categoriesMap.firstOrNull {
             FuzzySearch.ratio(
-                it.name.lowercase().replace("\n", "").trim(),
-                search.lowercase().replace("\n", "").trim()
+                it.name.lowercase(),
+                search.lowercase()
             ) >= 80
         }
         if (category == null) return null
@@ -414,7 +428,7 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
     }
 
     private fun getAllCategoriesHome(): Array<Pair<String, String>> {
-        return nsfwFilters.homeSearch.split(",").filter { search -> search.isNotBlank() }
+        return nsfwFilters.homeSearch.splitter(",")
             .map { search ->
                 if (!search.contains("+")) {
                     getUrlPairForSingleCategory(search)
@@ -437,10 +451,14 @@ class PornHub(val sharedPref: SharedPreferences) : MainAPI() {
     }
 
     private fun getAllHomeSearch(): Array<Pair<String, String>> =
-        nsfwFilters.homeSearch.split(",").filter { search -> search.isNotBlank() }
+        nsfwFilters.homeSearch.splitter(",")
             .filter { !categoriesFound.contains(it) }.map { search ->
                 val url = "$mainUrl/video/search".toHttpUrl().newBuilder()
                 url.setQueryParameter("search", search.replace(" ", "+"))
                 setSort(url.toString().toHttpUrl()).toString() to search.capitalize()
             }.toTypedArray()
+
+    fun String.splitter(delimiter:String): List<String> {
+        return this.replace("\n","").split(delimiter).map { it.trim() }.filter { it.isNotEmpty() }
+    }
 }
