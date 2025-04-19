@@ -8,15 +8,21 @@
     android:padding="20dp"
     tools:context=".NSFWFiltersFragment">
 
-    <TextView
-        android:id="@+id/disclaimerText"
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="15dp"
-        android:text="@string/disclaimer"
-        android:textAlignment="center"
-        android:textAllCaps="false"
-        android:textStyle="italic" />
+        android:layout_height="match_parent"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/disclaimerText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="15dp"
+            android:text="@string/disclaimer"
+            android:textAlignment="center"
+            android:textAllCaps="false"
+            android:textStyle="italic" />
+    </LinearLayout>
 
     <Switch
         android:id="@+id/hdOnly"
@@ -101,17 +107,5 @@
         android:ems="10"
         android:hint="@string/search_sorting_hint"
         android:inputType="text" />
-
-    <Button
-        android:id="@+id/saveButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/save_button" />
-
-    <Button
-        android:id="@+id/clearButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/clear_button" />
 
 </LinearLayout>
