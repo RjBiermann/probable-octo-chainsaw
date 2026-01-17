@@ -1,0 +1,37 @@
+package com.lagradost
+
+import android.content.Context
+import androidx.appcompat.app.AppCompatActivity
+import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
+import com.lagradost.cloudstream3.plugins.Plugin
+
+@CloudstreamPlugin
+class PornXpPlugin : Plugin() {
+    companion object {
+        private const val PREFS_NAME = "pornxp_plugin_prefs"
+        private const val KEY_CUSTOM_PAGES = "custom_pages"
+    }
+
+    override fun load(context: Context) {
+        val customPages = loadCustomPages(context)
+
+        openSettings = { ctx ->
+            val activity = ctx as? AppCompatActivity
+            if (activity != null && !activity.isFinishing && !activity.isDestroyed) {
+                PornXpSettingsFragment().show(activity.supportFragmentManager, "PornXpSettings")
+            }
+        }
+
+        registerMainAPI(PornXp(customPages))
+    }
+
+    private fun loadCustomPages(context: Context): List<CustomPage> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val json = prefs.getString(KEY_CUSTOM_PAGES, "[]") ?: "[]"
+        return try {
+            CustomPage.listFromJson(json)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+}

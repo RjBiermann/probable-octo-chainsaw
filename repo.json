@@ -1,0 +1,8 @@
+{
+    "name": "RjB NSFW Repository",
+    "description": "RjB NSFW Repository",
+    "manifestVersion": 1,
+    "pluginLists": [
+      "https://raw.githubusercontent.com/RjBiermann/probable-octo-chainsaw/builds/plugins.json"
+    ]
+}
