@@ -2,6 +2,7 @@ package com.lagradost
 
 import android.content.Context
 import android.content.res.ColorStateList
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -26,6 +27,10 @@ class CustomPagesAdapter(
     private val onMoveDown: (Int) -> Unit,
     private val onStartDrag: (RecyclerView.ViewHolder) -> Unit
 ) : RecyclerView.Adapter<CustomPagesAdapter.ViewHolder>() {
+
+    companion object {
+        private const val TAG = "CustomPagesAdapter"
+    }
 
     init {
         setHasStableIds(true)
@@ -71,6 +76,7 @@ class CustomPagesAdapter(
     fun moveItem(fromPosition: Int, toPosition: Int) {
         if (fromPosition < 0 || toPosition < 0 ||
             fromPosition >= filteredItems.size || toPosition >= filteredItems.size) {
+            Log.w(TAG, "Invalid move positions: from=$fromPosition, to=$toPosition, size=${filteredItems.size}")
             return
         }
 
@@ -97,6 +103,8 @@ class CustomPagesAdapter(
             filteredItems.add(toPosition, movedItem)
 
             notifyItemMoved(fromPosition, toPosition)
+        } else {
+            Log.e(TAG, "Data inconsistency: item not found in source list. fromSourceIndex=$fromSourceIndex, toSourceIndex=$toSourceIndex")
         }
     }
 
@@ -161,12 +169,20 @@ class CustomPagesAdapter(
 
         // Up button (TV mode only)
         val upButton: MaterialButton? = if (isTvMode) {
-            createArrowButton("\u2191").also { row.addView(it) } // Unicode up arrow
+            createArrowButton("\u2191").also { btn ->
+                row.addView(btn)
+                // Setup focus handling once at creation time
+                TvFocusUtils.makeFocusable(btn)
+            } // Unicode up arrow
         } else null
 
         // Down button (TV mode only)
         val downButton: MaterialButton? = if (isTvMode) {
-            createArrowButton("\u2193").also { row.addView(it) } // Unicode down arrow
+            createArrowButton("\u2193").also { btn ->
+                row.addView(btn)
+                // Setup focus handling once at creation time
+                TvFocusUtils.makeFocusable(btn)
+            } // Unicode down arrow
         } else null
 
         // Remove button
@@ -181,6 +197,10 @@ class CustomPagesAdapter(
             elevation = 0f
         }
         row.addView(removeButton)
+        // Setup focus handling once at creation time (TV mode)
+        if (isTvMode) {
+            TvFocusUtils.makeFocusable(removeButton)
+        }
 
         return ViewHolder(row, dragHandle, label, upButton, downButton, removeButton)
     }
@@ -207,27 +227,23 @@ class CustomPagesAdapter(
         // Setup Up/Down buttons (TV mode)
         holder.upButton?.apply {
             isEnabled = !isFirst && !isFiltered()
+            isFocusable = isEnabled  // Prevent focus on disabled buttons for TV navigation
             setTextColor(if (isEnabled) primaryColor else grayTextColor)
             setOnClickListener {
                 if (!isEnabled) return@setOnClickListener
                 val pos = holder.bindingAdapterPosition
                 if (pos != RecyclerView.NO_POSITION) onMoveUp(pos)
             }
-            if (isTvMode && isEnabled) {
-                TvFocusUtils.makeFocusable(this, primaryColor)
-            }
         }
 
         holder.downButton?.apply {
             isEnabled = !isLast && !isFiltered()
+            isFocusable = isEnabled  // Prevent focus on disabled buttons for TV navigation
             setTextColor(if (isEnabled) primaryColor else grayTextColor)
             setOnClickListener {
                 if (!isEnabled) return@setOnClickListener
                 val pos = holder.bindingAdapterPosition
                 if (pos != RecyclerView.NO_POSITION) onMoveDown(pos)
-            }
-            if (isTvMode && isEnabled) {
-                TvFocusUtils.makeFocusable(this, primaryColor)
             }
         }
 
@@ -235,9 +251,6 @@ class CustomPagesAdapter(
         holder.removeButton.setOnClickListener {
             val pos = holder.bindingAdapterPosition
             if (pos != RecyclerView.NO_POSITION) onRemove(pos)
-        }
-        if (isTvMode) {
-            TvFocusUtils.makeFocusable(holder.removeButton, primaryColor)
         }
     }
 

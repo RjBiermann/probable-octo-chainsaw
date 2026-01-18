@@ -185,16 +185,17 @@ class NepornSettingsFragment : DialogFragment() {
             )
             hint = "Paste URL from neporn.com"
             boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
-            setBoxStrokeColorStateList(ColorStateList.valueOf(primaryColor))
         }
         val urlInput = TextInputEditText(context).apply {
             setTextColor(textColor)
         }
         urlInputLayout.addView(urlInput)
 
-        // Apply TV focus handling to URL input
+        // Apply TV focus handling to URL input (uses Material's native stroke color)
         if (isTvMode) {
-            TvFocusUtils.makeFocusable(urlInput, primaryColor)
+            TvFocusUtils.makeFocusableTextInput(urlInputLayout, primaryColor)
+        } else {
+            urlInputLayout.setBoxStrokeColorStateList(ColorStateList.valueOf(primaryColor))
         }
 
         // Status Text
@@ -212,7 +213,6 @@ class NepornSettingsFragment : DialogFragment() {
             )
             hint = "Label (auto-detected)"
             boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
-            setBoxStrokeColorStateList(ColorStateList.valueOf(primaryColor))
             visibility = View.GONE
         }
         val labelInput = TextInputEditText(context).apply {
@@ -220,9 +220,11 @@ class NepornSettingsFragment : DialogFragment() {
         }
         labelInputLayout.addView(labelInput)
 
-        // Apply TV focus handling to label input
+        // Apply TV focus handling to label input (uses Material's native stroke color)
         if (isTvMode) {
-            TvFocusUtils.makeFocusable(labelInput, primaryColor)
+            TvFocusUtils.makeFocusableTextInput(labelInputLayout, primaryColor)
+        } else {
+            labelInputLayout.setBoxStrokeColorStateList(ColorStateList.valueOf(primaryColor))
         }
 
         // Add Button
@@ -238,7 +240,7 @@ class NepornSettingsFragment : DialogFragment() {
 
         // Apply TV focus handling to add button
         if (isTvMode) {
-            TvFocusUtils.makeFocusable(addButton, primaryColor)
+            TvFocusUtils.makeFocusable(addButton)
         }
 
         cardContent.addView(urlInputLayout)
@@ -257,7 +259,7 @@ class NepornSettingsFragment : DialogFragment() {
 
         // Apply TV focus handling to examples toggle
         if (isTvMode) {
-            TvFocusUtils.makeFocusable(examplesToggle, primaryColor, 1.02f) // Smaller scale for text
+            TvFocusUtils.makeFocusable(examplesToggle)
         }
 
         val examplesText = TextView(context).apply {
@@ -297,7 +299,6 @@ class NepornSettingsFragment : DialogFragment() {
             }
             hint = "Filter sections..."
             boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
-            setBoxStrokeColorStateList(ColorStateList.valueOf(primaryColor))
             endIconMode = TextInputLayout.END_ICON_CLEAR_TEXT
         }
         val filterInput = TextInputEditText(context).apply {
@@ -305,9 +306,11 @@ class NepornSettingsFragment : DialogFragment() {
         }
         filterInputLayout.addView(filterInput)
 
-        // Apply TV focus handling to filter input
+        // Apply TV focus handling to filter input (uses Material's native stroke color)
         if (isTvMode) {
-            TvFocusUtils.makeFocusable(filterInput, primaryColor)
+            TvFocusUtils.makeFocusableTextInput(filterInputLayout, primaryColor)
+        } else {
+            filterInputLayout.setBoxStrokeColorStateList(ColorStateList.valueOf(primaryColor))
         }
 
         // Empty state text
@@ -403,7 +406,7 @@ class NepornSettingsFragment : DialogFragment() {
 
         // Apply TV focus handling to close button
         if (isTvMode) {
-            TvFocusUtils.makeFocusable(closeButton, primaryColor)
+            TvFocusUtils.makeFocusable(closeButton)
         }
 
         // Wire up URL validation
