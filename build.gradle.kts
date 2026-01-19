@@ -66,6 +66,11 @@ subprojects {
                 )
             }
         }
+
+        // Allow android.util.Log to return defaults instead of throwing in unit tests
+        testOptions {
+            unitTests.isReturnDefaultValues = true
+        }
     }
 
     dependencies {
