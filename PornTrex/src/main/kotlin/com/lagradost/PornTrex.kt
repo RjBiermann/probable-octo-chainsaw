@@ -109,20 +109,20 @@ class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAP
         val description = document.selectFirst(".block-description, meta[name=description]")
             ?.let { it.text().ifBlank { it.attr("content") } }?.trim()
 
-        // Extract categories
-        val categories = document.select("a[href*='/categories/']")
-            .map { it.text().trim() }
-            .filter { it.isNotBlank() && !it.contains("Suggest") }
-            .distinct()
-
-        // Extract tags
-        val tags = document.select("a[href*='/tags/']")
+        // Extract categories - scoped to video info section, using js-cat class
+        val categories = document.select("div.info a.js-cat")
             .map { it.text().trim() }
             .filter { it.isNotBlank() }
-            .take(20) // Limit tags to avoid too many
+            .distinct()
 
-        // Extract actors/models
-        val actors = document.select("a[href*='/models/'], a[href*='/pornstars/']")
+        // Extract tags - scoped to video info section, excluding the categories container
+        val tags = document.select("div.info div.items-holder:not(.js-categories) a[href*='/tags/']")
+            .map { it.text().trim() }
+            .filter { it.isNotBlank() }
+            .take(20)
+
+        // Extract actors/models - scoped to video info section
+        val actors = document.select("div.info a[href*='/models/'], div.info a[href*='/pornstars/']")
             .map { it.text().trim() }
             .filter { it.isNotBlank() && !it.contains("Suggest") }
             .distinct()

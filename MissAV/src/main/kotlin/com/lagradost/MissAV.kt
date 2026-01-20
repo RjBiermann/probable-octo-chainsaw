@@ -21,11 +21,11 @@ class MissAV(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
     override val mainPage: List<MainPageData>
         get() = buildList {
             // Default pages - MissAV uses /dm{number}/en/{category} URL format
-            add(MainPageData(name = "Recent Update", data = "$mainUrl/dm514/en/new"))
-            add(MainPageData(name = "New Release", data = "$mainUrl/dm588/en/release"))
+            add(MainPageData(name = "Recent Update", data = "$mainUrl/dm515/en/new"))
+            add(MainPageData(name = "New Release", data = "$mainUrl/dm590/en/release"))
             add(MainPageData(name = "Today Hot", data = "$mainUrl/dm291/en/today-hot"))
             add(MainPageData(name = "Weekly Hot", data = "$mainUrl/dm169/en/weekly-hot"))
-            add(MainPageData(name = "Monthly Hot", data = "$mainUrl/dm256/en/monthly-hot"))
+            add(MainPageData(name = "Monthly Hot", data = "$mainUrl/dm263/en/monthly-hot"))
 
             // Custom pages from user settings
             customPages.forEach { page ->

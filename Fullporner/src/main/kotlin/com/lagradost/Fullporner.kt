@@ -102,25 +102,8 @@ class Fullporner(private val customPages: List<CustomPage> = emptyList()) : Main
         }
 
         // Extract poster from iframe video ID
-        // Iframe URL pattern: //xiaoshenke.net/video/{id}/{quality}
-        // The ID in iframe is stored reversed, so we reverse it back
-        // Poster URL patterns differ by ID type:
-        // - Numeric IDs: https://imgx.xiaoshenke.net/posterz/contents/videos_screenshots/{path}/{id}/preview_720p.mp4.jpg
-        // - Hex IDs: https://imgs.xiaoshenke.net/thumb/{id}.jpg
-        val poster = document.selectFirst("iframe[src*=xiaoshenke.net/video/]")?.attr("src")?.let { iframeSrc ->
-            val idMatch = Regex("""/video/([^/]+)/""").find(iframeSrc)
-            idMatch?.groupValues?.get(1)?.reversed()?.let { reversedId ->
-                if (reversedId.all { it.isDigit() }) {
-                    // Numeric ID - use imgx posterz pattern
-                    val numericId = reversedId.toLongOrNull() ?: return@let null
-                    val path = (numericId / 1000) * 1000
-                    "https://imgx.xiaoshenke.net/posterz/contents/videos_screenshots/$path/$reversedId/preview_720p.mp4.jpg"
-                } else {
-                    // Hex ID - use imgs thumb pattern
-                    "https://imgs.xiaoshenke.net/thumb/$reversedId.jpg"
-                }
-            }
-        }
+        // First try to find iframe in static HTML, then fallback to fetching iframe page
+        val poster = extractPoster(document, url)
 
         val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
 
@@ -241,5 +224,83 @@ class Fullporner(private val customPages: List<CustomPage> = emptyList()) : Main
             seconds > 0 -> 1
             else -> null
         }
+    }
+
+    /**
+     * Extract poster URL for a video.
+     *
+     * Strategies:
+     * 1. Find iframe in static HTML, extract reversed video ID from path, construct poster URL
+     * 2. If no iframe found but page URL contains video ID:
+     *    a. Construct iframe URL, fetch it, look for preview_url/poster in JavaScript
+     *    b. If not found, extract var id from JavaScript, reverse it, construct poster URL
+     *    c. If fetch fails or parsing fails, use page video ID directly as fallback
+     *
+     * Note: Video IDs in iframe URL paths and JavaScript var id are stored reversed
+     * (e.g., "abc123" becomes "321cba").
+     *
+     * @param document The parsed HTML document of the video page
+     * @param pageUrl The URL of the video page (used to extract video ID)
+     * @return Poster URL or null if extraction fails
+     */
+    private suspend fun extractPoster(document: org.jsoup.nodes.Document, pageUrl: String): String? {
+        // Strategy 1: Try to find iframe in static HTML and extract video ID
+        val iframeSrc = document.selectFirst("iframe[src*=xiaoshenke.net/video/]")?.attr("src")
+            ?: document.selectFirst("div.single-video iframe")?.attr("src")
+
+        if (iframeSrc != null && iframeSrc.contains("xiaoshenke.net/video/")) {
+            val idMatch = Regex("""/video/([^/]+)/""").find(iframeSrc)
+            // Reverse the path ID to get the original video ID
+            val videoId = idMatch?.groupValues?.get(1)?.reversed()
+            if (videoId != null) {
+                return buildPosterUrl(videoId)
+            } else {
+                Log.d("Fullporner", "Found xiaoshenke iframe but video ID regex didn't match: $iframeSrc")
+            }
+        }
+
+        // Strategy 2: Construct iframe URL and fetch poster from JavaScript variables
+        val pageVideoId = Regex("""/watch/([a-zA-Z0-9]+)""").find(pageUrl)?.groupValues?.get(1)
+        if (pageVideoId != null) {
+            // Page URL has video ID in normal form; iframe path uses reversed form
+            val iframePathId = pageVideoId.reversed()
+            val constructedIframeUrl = "https://xiaoshenke.net/video/$iframePathId/7"
+
+            try {
+                val iframeDoc = app.get(constructedIframeUrl, referer = pageUrl).text
+
+                // Strategy 2a: Look for poster/preview URL in iframe JavaScript
+                val previewMatch = Regex("""(?:preview_url|poster)\s*[=:]\s*['"]([^'"]+)['"]""").find(iframeDoc)
+                if (previewMatch != null) {
+                    val previewUrl = previewMatch.groupValues[1]
+                    return if (previewUrl.startsWith("//")) "https:$previewUrl" else previewUrl
+                }
+
+                // Strategy 2b: Extract video ID from iframe JavaScript (var id = "xxx") - also stored reversed
+                val idMatch = Regex("""var\s+id\s*=\s*["']([^"']+)["']""").find(iframeDoc)
+                val iframeVideoId = idMatch?.groupValues?.get(1)
+                if (iframeVideoId != null) {
+                    return buildPosterUrl(iframeVideoId.reversed())
+                }
+
+                // Fetched iframe successfully but couldn't extract poster info
+                Log.d("Fullporner", "Fetched iframe but couldn't extract poster from JavaScript for: $pageUrl")
+            } catch (e: Exception) {
+                Log.w("Fullporner", "Failed to fetch iframe for poster from '$pageUrl': ${e.message}")
+            }
+
+            // Strategy 2c: Fall back to page video ID directly
+            return buildPosterUrl(pageVideoId)
+        }
+
+        return null
+    }
+
+    /**
+     * Build poster URL from video ID.
+     * All thumbnails use imgs.xiaoshenke.net/thumb/{id}.jpg pattern.
+     */
+    private fun buildPosterUrl(videoId: String): String {
+        return "https://imgs.xiaoshenke.net/thumb/$videoId.jpg"
     }
 }

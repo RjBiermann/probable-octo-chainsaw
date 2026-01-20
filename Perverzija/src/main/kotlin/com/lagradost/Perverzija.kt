@@ -105,7 +105,7 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
             .filter { it.isNotBlank() }
             .distinct()
 
-        val recommendations = document.select("div.related-gallery dl.gallery-item").mapNotNull {
+        val recommendations = document.select("div.xs-related-item").mapNotNull {
             it.toRecommendationResult()
         }
 
@@ -139,9 +139,57 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
             return false
         }
 
-        // Use loadExtractor which will automatically route to the registered Playhydrax extractor
-        // for playhydrax.com/abysscdn.com URLs, and other extractors for their respective domains
-        return loadExtractor(iframeUrl, data, subtitleCallback, callback)
+        Log.d(TAG, "Found iframe URL: $iframeUrl")
+
+        // Directly call extractors based on URL pattern for reliable matching
+        // (loadExtractor may not match subdomains like pervl4.xtremestream.co)
+        // Track whether any links were found via wrapped callback
+        var foundLinks = false
+        val trackingCallback: (ExtractorLink) -> Unit = { link ->
+            foundLinks = true
+            callback(link)
+        }
+
+        return when {
+            iframeUrl.contains("xtremestream") -> {
+                try {
+                    Xtremestream().getUrl(iframeUrl, data, subtitleCallback, trackingCallback)
+                    if (!foundLinks) {
+                        Log.w(TAG, "Xtremestream extractor found no video links for: $iframeUrl")
+                    }
+                    foundLinks
+                } catch (e: Exception) {
+                    Log.e(TAG, "Xtremestream extractor failed for: $iframeUrl", e)
+                    false
+                }
+            }
+            iframeUrl.contains("playhydrax") || iframeUrl.contains("abysscdn") -> {
+                try {
+                    Playhydrax().getUrl(iframeUrl, data, subtitleCallback, trackingCallback)
+                    if (!foundLinks) {
+                        Log.w(TAG, "Playhydrax extractor found no video links for: $iframeUrl")
+                    }
+                    foundLinks
+                } catch (e: Exception) {
+                    Log.e(TAG, "Playhydrax extractor failed for: $iframeUrl", e)
+                    false
+                }
+            }
+            else -> {
+                // Fallback to loadExtractor for unknown embeds
+                Log.d(TAG, "Using generic loadExtractor for unknown embed: $iframeUrl")
+                try {
+                    loadExtractor(iframeUrl, data, subtitleCallback, trackingCallback)
+                    if (!foundLinks) {
+                        Log.w(TAG, "loadExtractor found no video links for unknown embed: $iframeUrl")
+                    }
+                    foundLinks
+                } catch (e: Exception) {
+                    Log.e(TAG, "loadExtractor failed for unknown embed: $iframeUrl", e)
+                    false
+                }
+            }
+        }
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
@@ -155,9 +203,10 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
     }
 
     private fun Element.toRecommendationResult(): SearchResponse? {
-        val posterUrl = fixUrlNull(this.selectFirst("dt a img")?.attr("src"))
-        val title = this.selectFirst("dd a")?.text() ?: return null
-        val href = fixUrlNull(this.selectFirst("dt a")?.attr("href")) ?: return null
+        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("src"))
+        val titleLink = this.selectFirst("div.xs-related-title a") ?: return null
+        val title = titleLink.text().takeIf { it.isNotBlank() } ?: return null
+        val href = fixUrlNull(titleLink.attr("href")) ?: return null
 
         return newMovieSearchResponse(title, href, TvType.NSFW) {
             this.posterUrl = posterUrl

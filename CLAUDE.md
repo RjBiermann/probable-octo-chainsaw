@@ -59,7 +59,7 @@ Video URLs are found via:
 Some plugins use separate `ExtractorApi` classes for external video hosts:
 - `HQWOExtractor` - hqwo.cc / bigcdn.cc
 - `MyDaddyExtractor` - mydaddy.cc
-- `FullpornerExtractor` - embed.fullporner.com
+- `FullpornerExtractor` - xiaoshenke.net (video player used by fullporner.com)
 - `Playhydrax`, `Xtremestream` - Various embed players
 
 Extractors register with `addExtractor()` in the Plugin class and implement `getUrl()` to parse embed pages.
@@ -112,6 +112,26 @@ Test dependencies: JUnit 4, kotlin-test, mockk
 
 Tests focus on URL validation (pure Kotlin, no Android deps). `unitTests.isReturnDefaultValues = true` in build config allows mocking Android's `Log` class.
 
+## Commit Workflow
+
+**Before committing changes to any plugin, always increment its version number.**
+
+The version is an integer at the top of each plugin's `build.gradle.kts`:
+```kotlin
+version = 3  // Increment this when making changes
+```
+
+### Pre-commit checklist:
+1. **Bump version** - Increment `version = N` in `PluginName/build.gradle.kts`
+2. **Build** - Run `./gradlew :PluginName:make` to verify compilation
+3. **Test** - Run `./gradlew :PluginName:test` if tests exist
+4. **Commit** - Include version bump in the same commit as the changes
+
+### Why versioning matters:
+- Cloudstream uses the version number to detect plugin updates
+- Users won't receive updates if the version isn't incremented
+- The `plugins.json` manifest includes version numbers for update checking
+
 ## Troubleshooting
 
 ### Kotlin Version Mismatch
@@ -138,6 +158,21 @@ To test a single plugin quickly:
 ./gradlew :PluginName:compileDebugKotlin  # Just compile (fastest check)
 ./gradlew :PluginName:make                # Full plugin build
 ```
+
+## Reference Sources
+
+Local repositories for exploring Cloudstream APIs and plugin patterns. Paths are relative to the parent directory (`../`).
+
+### Cloudstream App (Core APIs)
+
+**Path:** `../cloudstream`
+**GitHub:** https://github.com/recloudstream/cloudstream
+
+The main Cloudstream app source. Useful for understanding:
+- `MainAPI` base class and its methods
+- `LoadResponse`, `SearchResponse`, `ExtractorLink` data structures
+- Built-in extractors in `app/src/main/java/com/lagradost/cloudstream3/extractors/`
+- Theme attributes for UI styling
 
 ## Maintaining This File
 
