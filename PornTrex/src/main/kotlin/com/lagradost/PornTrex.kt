@@ -180,6 +180,12 @@ class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAP
                             newExtractorLink(name, "$name - $qualityText", url) {
                                 this.referer = data
                                 this.quality = getQualityFromText(qualityText)
+                                this.headers = mapOf(
+                                    "Accept" to "*/*",
+                                    "Accept-Language" to "en-US,en;q=0.9",
+                                    "Connection" to "keep-alive",
+                                    "Range" to "bytes=0-"
+                                )
                             }
                         )
                         linksFound = true
