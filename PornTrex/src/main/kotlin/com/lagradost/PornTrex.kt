@@ -171,6 +171,8 @@ class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAP
             if (html.contains("flashvars")) {
                 videoKeys.forEach { (key, defaultQuality) ->
                     val url = Regex("""$key\s*:\s*'([^']+)'""").find(html)?.groupValues?.get(1)
+                        ?.removePrefix("function/0/")
+                        ?.substringBefore("?br=")
                     val qualityText = Regex("""${key}_text\s*:\s*'([^']+)'""").find(html)?.groupValues?.get(1) ?: defaultQuality
 
                     if (!url.isNullOrBlank() && url.startsWith("http")) {
