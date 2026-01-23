@@ -53,12 +53,24 @@ class AddFeedsToGroupDialog(
     private lateinit var feedListContainer: LinearLayout
     private lateinit var addButton: MaterialButton
     private lateinit var selectAllCheckbox: CheckBox
+    private lateinit var mainContainer: LinearLayout
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val context = requireContext()
         colors = DialogUtils.resolveThemeColors(context)
         val contentView = createDialogView(context)
         return DialogUtils.createTvOrBottomSheetDialog(context, isTvMode, theme, contentView, 0.9)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (isTvMode) {
+            dialog?.window?.decorView?.post {
+                if (isAdded && ::mainContainer.isInitialized && mainContainer.isAttachedToWindow) {
+                    TvFocusUtils.requestInitialFocus(mainContainer)
+                }
+            }
+        }
     }
 
     private fun createDialogView(context: Context): View {
@@ -70,7 +82,7 @@ class AddFeedsToGroupDialog(
             setBackgroundColor(backgroundColor)
         }
 
-        val mainContainer = LinearLayout(context).apply {
+        mainContainer = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(24), dp(24), dp(24))
         }
@@ -186,6 +198,14 @@ class AddFeedsToGroupDialog(
                 }
                 rebuildFeedList(context)
                 updateAddButton()
+                // Restore focus to checkbox after rebuild (TV mode)
+                if (isTvMode) {
+                    selectAllCheckbox.post {
+                        if (isAdded && selectAllCheckbox.isAttachedToWindow) {
+                            selectAllCheckbox.requestFocus()
+                        }
+                    }
+                }
             }
         }
         if (isTvMode) TvFocusUtils.makeFocusable(selectAllCheckbox)
@@ -330,6 +350,11 @@ class AddFeedsToGroupDialog(
         isUpdatingSelectAll = true
         selectAllCheckbox.isChecked = allSelected
         isUpdatingSelectAll = false
+
+        // Re-enable focus loop after content rebuild (TV mode)
+        if (isTvMode) {
+            TvFocusUtils.enableFocusLoop(mainContainer)
+        }
     }
 
     private fun createSectionHeader(context: Context, title: String, count: Int): View {
@@ -353,46 +378,78 @@ class AddFeedsToGroupDialog(
 
     private fun createExistingFeedRow(context: Context, feed: FeedItem): View {
         val isSelected = feed.key() in selectedExistingKeys
+        val feedKey = feed.key()
         return createFeedCard(
             context = context,
+            feedKey = feedKey,
             name = feed.sectionName,
             pluginName = feed.pluginName,
             isSelected = isSelected,
             showBadge = false,
             onToggle = {
                 if (isSelected) {
-                    selectedExistingKeys.remove(feed.key())
+                    selectedExistingKeys.remove(feedKey)
                 } else {
-                    selectedExistingKeys.add(feed.key())
+                    selectedExistingKeys.add(feedKey)
                 }
                 rebuildFeedList(context)
                 updateAddButton()
+                restoreFocusToFeed(feedKey)
             }
         )
     }
 
     private fun createAvailableFeedRow(context: Context, feed: AvailableFeed): View {
         val isSelected = feed.key() in selectedAvailableKeys
+        val feedKey = feed.key()
         return createFeedCard(
             context = context,
+            feedKey = feedKey,
             name = feed.sectionName,
             pluginName = feed.pluginName,
             isSelected = isSelected,
             showBadge = true,
             onToggle = {
                 if (isSelected) {
-                    selectedAvailableKeys.remove(feed.key())
+                    selectedAvailableKeys.remove(feedKey)
                 } else {
-                    selectedAvailableKeys.add(feed.key())
+                    selectedAvailableKeys.add(feedKey)
                 }
                 rebuildFeedList(context)
                 updateAddButton()
+                restoreFocusToFeed(feedKey)
             }
         )
     }
 
+    private fun restoreFocusToFeed(feedKey: String) {
+        if (!isTvMode) return
+        feedListContainer.post {
+            if (!isAdded) return@post
+            // Find card with matching tag
+            for (i in 0 until feedListContainer.childCount) {
+                val child = feedListContainer.getChildAt(i)
+                if (child.tag == feedKey && child.isAttachedToWindow) {
+                    child.requestFocus()
+                    return@post
+                }
+                // Check nested children (plugin groups)
+                if (child is ViewGroup) {
+                    for (j in 0 until child.childCount) {
+                        val nested = child.getChildAt(j)
+                        if (nested.tag == feedKey && nested.isAttachedToWindow) {
+                            nested.requestFocus()
+                            return@post
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private fun createFeedCard(
         context: Context,
+        feedKey: String,
         name: String,
         pluginName: String,
         isSelected: Boolean,
@@ -400,6 +457,7 @@ class AddFeedsToGroupDialog(
         onToggle: () -> Unit
     ): View {
         val card = MaterialCardView(context).apply {
+            tag = feedKey  // Tag for focus restoration
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT

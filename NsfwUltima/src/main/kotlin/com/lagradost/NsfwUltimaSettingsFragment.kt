@@ -142,7 +142,9 @@ class NsfwUltimaSettingsFragment(
         super.onStart()
         if (isTvMode) {
             dialog?.window?.decorView?.post {
-                TvFocusUtils.requestInitialFocus(mainContainer)
+                if (isAdded && ::mainContainer.isInitialized && mainContainer.isAttachedToWindow) {
+                    TvFocusUtils.requestInitialFocus(mainContainer)
+                }
             }
         }
     }
@@ -543,7 +545,7 @@ class NsfwUltimaSettingsFragment(
     private fun getAvailableFeeds(): List<AvailableFeed> {
         val feeds = mutableListOf<AvailableFeed>()
         val nsfwProviders = allProviders.filter { api ->
-            api.supportedTypes.contains(TvType.NSFW)
+            api.supportedTypes.contains(TvType.NSFW) && api.name != "NSFW Ultima"
         }
 
         nsfwProviders.forEach { api ->
@@ -829,7 +831,13 @@ class NsfwUltimaSettingsFragment(
         if (isTvMode) {
             dialog.lifecycle.addObserver(object : DefaultLifecycleObserver {
                 override fun onDestroy(owner: LifecycleOwner) {
-                    manageFeedsButton?.post { manageFeedsButton?.requestFocus() }
+                    if (isAdded && view != null) {
+                        manageFeedsButton?.post {
+                            if (isAdded && manageFeedsButton?.isAttachedToWindow == true) {
+                                manageFeedsButton?.requestFocus()
+                            }
+                        }
+                    }
                 }
             })
         }

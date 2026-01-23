@@ -37,12 +37,24 @@ class FeedGroupEditorDialog(
 
     private lateinit var nameInput: TextInputEditText
     private lateinit var nameLayout: TextInputLayout
+    private lateinit var mainContainer: LinearLayout
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val context = requireContext()
         colors = DialogUtils.resolveThemeColors(context)
         val contentView = createDialogView(context)
         return DialogUtils.createTvOrBottomSheetDialogSimple(context, isTvMode, theme, contentView)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (isTvMode) {
+            dialog?.window?.decorView?.post {
+                if (isAdded && ::mainContainer.isInitialized && mainContainer.isAttachedToWindow) {
+                    TvFocusUtils.requestInitialFocus(mainContainer)
+                }
+            }
+        }
     }
 
     private fun createDialogView(context: Context): View {
@@ -54,7 +66,7 @@ class FeedGroupEditorDialog(
             setBackgroundColor(backgroundColor)
         }
 
-        val mainContainer = LinearLayout(context).apply {
+        mainContainer = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(24), dp(24), dp(24))
         }

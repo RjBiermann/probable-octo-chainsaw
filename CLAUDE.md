@@ -95,6 +95,27 @@ Each plugin detects TV mode via `TvFocusUtils.isTvMode()` and adapts:
 - Focus loops (last→first element wrapping)
 - Wider dialogs for TV visibility
 
+**Focus restoration after view rebuilds:** When `removeAllViews()` or list rebuilds occur, focus is lost. Pattern:
+1. Tag views with identifiers: `card.tag = itemKey`
+2. After rebuild, find and restore: `container.post { findViewWithTag(key)?.requestFocus() }`
+3. Always guard with lifecycle checks: `if (isAdded && view.isAttachedToWindow)`
+
+**Adapter tagging:** In RecyclerView adapters, add `holder.itemView.tag = item.key()` in bind methods (`bindFeed`, `bindGroup`) so parent dialogs can locate items by key after `submitList()` or `notifyDataSetChanged()`.
+
+**Dialog initial focus:** All dialogs need `onStart()` override:
+```kotlin
+override fun onStart() {
+    super.onStart()
+    if (isTvMode) {
+        dialog?.window?.decorView?.post {
+            if (isAdded && ::mainContainer.isInitialized && mainContainer.isAttachedToWindow) {
+                TvFocusUtils.requestInitialFocus(mainContainer)
+            }
+        }
+    }
+}
+```
+
 ### CommonLib Shared Module
 
 Shared utilities live in `CommonLib/src/main/kotlin/com/lagradost/common/`:
@@ -166,26 +187,6 @@ D8 warnings like "error parsing kotlin metadata" indicate AGP/Kotlin version mis
 ## Testing
 
 Tests focus on URL validation (pure Kotlin, no Android deps). `unitTests.isReturnDefaultValues = true` in build config allows mocking Android's `Log` class.
-
-## Commit Workflow
-
-**Before committing changes to any plugin, always increment its version number.**
-
-The version is an integer at the top of each plugin's `build.gradle.kts`:
-```kotlin
-version = 3  // Increment this when making changes
-```
-
-### Pre-commit checklist:
-1. **Bump version** - Increment `version = N` in `PluginName/build.gradle.kts`
-2. **Build** - Run `./gradlew :PluginName:make` to verify compilation
-3. **Test** - Run `./gradlew :PluginName:test` if tests exist
-4. **Commit** - Include version bump in the same commit as the changes
-
-### Why versioning matters:
-- Cloudstream uses the version number to detect plugin updates
-- Users won't receive updates if the version isn't incremented
-- The `plugins.json` manifest includes version numbers for update checking
 
 ## Troubleshooting
 

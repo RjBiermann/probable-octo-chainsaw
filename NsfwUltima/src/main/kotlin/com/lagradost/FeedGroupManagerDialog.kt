@@ -72,6 +72,17 @@ class FeedGroupManagerDialog(
         return DialogUtils.createTvOrBottomSheetDialogSimple(context, isTvMode, theme, contentView)
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (isTvMode) {
+            dialog?.window?.decorView?.post {
+                if (isAdded && ::mainContainer.isInitialized && mainContainer.isAttachedToWindow) {
+                    TvFocusUtils.requestInitialFocus(mainContainer)
+                }
+            }
+        }
+    }
+
     private fun createDialogView(context: Context): View {
         val scrollView = NestedScrollView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
@@ -355,6 +366,8 @@ class FeedGroupManagerDialog(
                 }
                 onGroupsChanged(groups)
                 refreshGroupsList()
+                // Restore focus to edited/created group
+                restoreFocusToGroup(updatedGroup.id)
             }
         )
         dialog.show(parentFragmentManager, "FeedGroupEditorDialog")
@@ -434,14 +447,35 @@ class FeedGroupManagerDialog(
 
                 onFeedsUpdated(currentFeeds)
                 refreshGroupsList()
+                // Restore focus to the group that was modified
+                restoreFocusToGroup(group.id)
             }
         )
         dialog.show(parentFragmentManager, "AddFeedsToGroupDialog")
     }
 
+    private fun restoreFocusToGroup(groupId: String) {
+        if (!isTvMode) return
+        groupsRecyclerView.post {
+            if (!isAdded) return@post
+            // Find group with matching tag
+            for (i in 0 until groupsRecyclerView.childCount) {
+                val child = groupsRecyclerView.getChildAt(i)
+                if (child.tag == groupId && child.isAttachedToWindow) {
+                    child.requestFocus()
+                    return@post
+                }
+            }
+        }
+    }
+
     private fun refreshGroupsList() {
         groupAdapter.submitList(groups)
         updateEmptyState()
+        // Re-enable focus loop after list refresh (TV mode)
+        if (isTvMode) {
+            TvFocusUtils.enableFocusLoop(mainContainer)
+        }
     }
 
     private fun updateEmptyState() {

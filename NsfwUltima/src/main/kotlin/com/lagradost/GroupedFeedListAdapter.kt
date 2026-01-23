@@ -244,6 +244,9 @@ class GroupedFeedListAdapter(
         val isInGroup = item.groupId != null
         val isSelected = reorderModeEnabled && position == selectedPosition
 
+        // Tag for focus restoration
+        holder.itemView.tag = feed.key()
+
         // Indent feeds that are in a group
         val leftPadding = if (isInGroup) dp(36) else dp(12)
         holder.itemView.setPadding(leftPadding, dp(10), dp(12), dp(10))

@@ -202,6 +202,9 @@ class GroupListAdapter(
         val isSelected = reorderModeEnabled && position == selectedPosition
         val feedCount = getFeedCount(group.id)
 
+        // Tag for focus restoration
+        holder.itemView.tag = group.id
+
         holder.nameText.text = group.name
         holder.countText.text = "$feedCount feeds"
         holder.countText.setTextColor(if (feedCount > 0) primaryColor else grayTextColor)

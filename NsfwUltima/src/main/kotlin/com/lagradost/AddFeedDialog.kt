@@ -47,6 +47,7 @@ class AddFeedDialog(
     private var primaryColor: Int = 0
 
     private lateinit var contentContainer: LinearLayout
+    private lateinit var mainContainer: LinearLayout
     private var currentFilter: String = ""
 
     // Track which feeds are added (updated when dialog opens)
@@ -113,6 +114,17 @@ class AddFeedDialog(
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (isTvMode) {
+            dialog?.window?.decorView?.post {
+                if (isAdded && ::mainContainer.isInitialized && mainContainer.isAttachedToWindow) {
+                    TvFocusUtils.requestInitialFocus(mainContainer)
+                }
+            }
+        }
+    }
+
     private fun createDialogView(context: Context): View {
         val scrollView = NestedScrollView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
@@ -122,7 +134,7 @@ class AddFeedDialog(
             setBackgroundColor(backgroundColor)
         }
 
-        val mainContainer = LinearLayout(context).apply {
+        mainContainer = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(24), dp(24), dp(24))
         }
@@ -387,10 +399,17 @@ class AddFeedDialog(
 
             contentContainer.addView(chipGroup)
         }
+
+        // Re-enable focus loop after content rebuild (TV mode)
+        if (isTvMode) {
+            TvFocusUtils.enableFocusLoop(mainContainer)
+        }
     }
 
     private fun createFeedChip(context: Context, feed: AvailableFeed, isAdded: Boolean): Chip {
+        val feedKey = feed.key()
         return Chip(context).apply {
+            tag = feedKey  // Tag for focus restoration
             text = if (isAdded) "✓ ${feed.sectionName}" else "+ ${feed.sectionName}"
             isCheckable = false
             isClickable = true  // Always clickable - add or remove
@@ -403,8 +422,9 @@ class AddFeedDialog(
 
                 setOnClickListener {
                     onFeedRemoved(feed)
-                    addedKeys.remove(feed.key())
+                    addedKeys.remove(feedKey)
                     rebuildContent(context)
+                    restoreFocusToChip(feedKey)
                 }
             } else {
                 // Available - click to add
@@ -415,13 +435,34 @@ class AddFeedDialog(
 
                 setOnClickListener {
                     onFeedSelected(feed)
-                    addedKeys.add(feed.key())
+                    addedKeys.add(feedKey)
                     rebuildContent(context)
+                    restoreFocusToChip(feedKey)
                 }
             }
 
             if (isTvMode) {
                 TvFocusUtils.makeFocusable(this)
+            }
+        }
+    }
+
+    private fun restoreFocusToChip(feedKey: String) {
+        if (!isTvMode) return
+        contentContainer.post {
+            if (!isAdded) return@post
+            // Search through chip groups for matching tag
+            for (i in 0 until contentContainer.childCount) {
+                val child = contentContainer.getChildAt(i)
+                if (child is ChipGroup) {
+                    for (j in 0 until child.childCount) {
+                        val chip = child.getChildAt(j)
+                        if (chip.tag == feedKey && chip.isAttachedToWindow) {
+                            chip.requestFocus()
+                            return@post
+                        }
+                    }
+                }
             }
         }
     }
