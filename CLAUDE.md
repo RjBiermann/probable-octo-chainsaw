@@ -25,7 +25,10 @@ When using AI assistance for contributions to this repository:
 ./gradlew test                  # Run all tests
 ./gradlew :PluginName:test      # Run single plugin's tests (e.g., :Neporn:test)
 ./gradlew clean                 # Clean build directory
+./gradlew build --warning-mode all  # Show deprecation warnings
 ```
+
+CI uses `--parallel --build-cache --no-daemon` flags for optimal performance.
 
 ## Architecture
 
@@ -147,6 +150,15 @@ Provided by root build.gradle.kts:
 
 Test dependencies: JUnit 4, kotlin-test, mockk
 
+## Version Compatibility
+
+AGP, Kotlin, and Gradle versions must be compatible:
+- Kotlin 2.3 requires AGP 8.13.2+ (includes R8 8.13.19 with Kotlin 2.3 metadata support)
+- AGP 8.13.x requires Gradle 8.13+
+- Check https://developer.android.com/build/kotlin-support for compatibility matrix
+
+D8 warnings like "error parsing kotlin metadata" indicate AGP/Kotlin version mismatch.
+
 ## Testing
 
 Tests focus on URL validation (pure Kotlin, no Android deps). `unitTests.isReturnDefaultValues = true` in build config allows mocking Android's `Log` class.
@@ -183,6 +195,15 @@ Module was compiled with an incompatible version of Kotlin. The binary version o
 The `cloudstream3:pre-release` dependency was compiled with a newer Kotlin version. Fix by updating in root `build.gradle.kts`:
 - `kotlin-gradle-plugin` version in buildscript dependencies
 - `kotlin-test` version in test dependencies
+
+### D8 Kotlin Metadata Warnings
+
+If CI shows warnings like:
+```
+WARNING: D8: An error occurred when parsing kotlin metadata
+```
+
+The R8/D8 bundled with AGP doesn't support your Kotlin version. Fix by upgrading AGP to a version with compatible R8 (see Version Compatibility section above).
 
 ### Verify Builds Locally Before Pushing
 

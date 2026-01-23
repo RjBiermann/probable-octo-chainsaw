@@ -49,6 +49,8 @@ jobs:
           path: |
             ~/.gradle/caches/build-cache-*
             ~/.gradle/caches/transforms-*
+            ~/.gradle/native
+            ~/.gradle/wrapper
           key: gradle-build-cache-${{ hashFiles('**/*.gradle.kts', 'gradle.properties') }}
           restore-keys: |
             gradle-build-cache-
@@ -57,11 +59,12 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/src
           chmod +x gradlew
-          ./gradlew make makePluginsJson --parallel --build-cache
+          ./gradlew make makePluginsJson --parallel --build-cache --no-daemon
           cp **/build/*.cs3 $GITHUB_WORKSPACE/builds
           cp build/plugins.json $GITHUB_WORKSPACE/builds
         # Note: --configuration-cache not used because Cloudstream gradle plugin
         # tasks (make, deployWithAdb) are incompatible with it
+        # --no-daemon prevents orphan Java processes in CI
 
       - name: Push builds
         run: |
