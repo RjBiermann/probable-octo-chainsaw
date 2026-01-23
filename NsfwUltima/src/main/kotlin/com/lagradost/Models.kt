@@ -1,7 +1,10 @@
 package com.lagradost
 
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
+
+private const val TAG = "NsfwUltimaModels"
 
 /**
  * Shared constants for NSFW plugin detection.
@@ -48,6 +51,7 @@ data class PluginState(
                 priority = json.optInt("priority", 0)
             )
         } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse PluginState from JSON: ${e.message}")
             null
         }
     }
@@ -81,6 +85,7 @@ data class SectionState(
                 customLabel = json.optString("customLabel").ifBlank { null }
             )
         } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse SectionState from JSON: ${e.message}")
             null
         }
     }
@@ -108,6 +113,7 @@ data class NsfwUltimaSettings(
                 maxSearchConcurrency = json.optInt("maxSearchConcurrency", 4)
             )
         } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse NsfwUltimaSettings, using defaults: ${e.message}")
             NsfwUltimaSettings()
         }
     }
@@ -136,6 +142,7 @@ data class AggregatedSectionData(
                 data = obj.getString("data")
             )
         } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse AggregatedSectionData from JSON: ${e.message}")
             null
         }
     }
@@ -148,12 +155,14 @@ data class AggregatedSectionData(
 data class FeedItem(
     val pluginName: String,
     val sectionName: String,
-    val sectionData: String
+    val sectionData: String,
+    val groupId: String? = null  // Optional group assignment for manual categorization
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("pluginName", pluginName)
         put("sectionName", sectionName)
         put("sectionData", sectionData)
+        if (groupId != null) put("groupId", groupId)
     }
 
     /** Create unique key for comparison */
@@ -164,12 +173,68 @@ data class FeedItem(
             FeedItem(
                 pluginName = json.getString("pluginName"),
                 sectionName = json.getString("sectionName"),
-                sectionData = json.getString("sectionData")
+                sectionData = json.getString("sectionData"),
+                groupId = json.optString("groupId").ifBlank { null }
             )
         } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse FeedItem from JSON: ${e.message}")
             null
         }
     }
+}
+
+/**
+ * Represents a user-created group of feeds.
+ */
+data class FeedGroup(
+    val id: String,
+    val name: String,
+    val priority: Int = 0  // Reserved for future sorting (currently follows list order)
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("id", id)
+        put("name", name)
+        put("priority", priority)
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): FeedGroup? = try {
+            FeedGroup(
+                id = json.getString("id"),
+                name = json.getString("name"),
+                priority = json.optInt("priority", 0)
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse FeedGroup from JSON: ${e.message}")
+            null
+        }
+
+        /**
+         * Create a new group with generated ID.
+         */
+        fun create(name: String): FeedGroup {
+            return FeedGroup(
+                id = "group_${java.util.UUID.randomUUID().toString().take(8)}",
+                name = name.trim()
+            )
+        }
+    }
+}
+
+/**
+ * Sealed class for adapter items in grouped view.
+ */
+sealed class GroupedFeedItem {
+    data class Header(
+        val group: FeedGroup,
+        val feedCount: Int,
+        val isExpanded: Boolean
+    ) : GroupedFeedItem()
+
+    data class Feed(
+        val item: FeedItem,
+        val groupId: String?
+    ) : GroupedFeedItem()
 }
 
 /**

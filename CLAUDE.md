@@ -83,6 +83,10 @@ All settings UIs are built programmatically (no XML) using Material components:
 - `RecyclerView` with `ItemTouchHelper` for drag-reorder (touch mode only)
 - Theme colors resolved at runtime from Cloudstream attributes with Android fallbacks
 
+**Storage error handling:** Storage save methods should return `Boolean` success/failure. Callers must check the return value and show user feedback (Toast) on failure. Never silently ignore save failures.
+
+**Dialog callbacks:** When dialogs modify data and call parent callbacks (e.g., `onGroupsChanged`), the parent must call UI refresh methods (e.g., `refreshGroupedView()`) to update the display. Changes won't reflect automatically.
+
 ### TV Mode Support
 
 Each plugin detects TV mode via `TvFocusUtils.isTvMode()` and adapts:

@@ -17,6 +17,8 @@ object NsfwUltimaStorage {
     private const val TAG = "NsfwUltimaStorage"
     private const val KEY_FEED_LIST = "NSFWULTIMA_FEED_LIST"
     private const val KEY_SETTINGS = "NSFWULTIMA_SETTINGS"
+    private const val KEY_GROUPS = "NSFWULTIMA_GROUPS"
+    private const val KEY_COLLAPSED_GROUPS = "NSFWULTIMA_COLLAPSED_GROUPS"
     // Legacy keys for migration from PageManager
     private const val LEGACY_KEY_FEED_LIST = "PAGEMANAGER_FEED_LIST"
     private const val LEGACY_KEY_SETTINGS = "PAGEMANAGER_SETTINGS"
@@ -111,9 +113,13 @@ object NsfwUltimaStorage {
             }
 
         if (feeds.isNotEmpty()) {
-            saveFeedList(feeds)
-            // Clear old data after successful migration
-            setKey(LEGACY_KEY_PLUGIN_STATES, null)
+            val saveSucceeded = saveFeedList(feeds)
+            if (saveSucceeded) {
+                // Clear old data only after successful migration
+                setKey(LEGACY_KEY_PLUGIN_STATES, null)
+            } else {
+                Log.e(TAG, "Migration failed: could not save feed list, keeping legacy data")
+            }
         }
 
         return feeds.ifEmpty { null }
@@ -151,14 +157,85 @@ object NsfwUltimaStorage {
     }
 
     /**
-     * Clear all stored data.
+     * Load user-created groups.
      */
-    fun clearAll() {
-        setKey(KEY_FEED_LIST, null)
-        setKey(KEY_SETTINGS, null)
-        // Also clear legacy keys
-        setKey(LEGACY_KEY_FEED_LIST, null)
-        setKey(LEGACY_KEY_PLUGIN_STATES, null)
-        setKey(LEGACY_KEY_SETTINGS, null)
+    fun loadGroups(): List<FeedGroup> {
+        return try {
+            val json = getKey<String>(KEY_GROUPS) ?: return emptyList()
+            val array = JSONArray(json)
+            (0 until array.length()).mapNotNull { i ->
+                FeedGroup.fromJson(array.getJSONObject(i))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load groups", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Save user-created groups.
+     */
+    fun saveGroups(groups: List<FeedGroup>): Boolean {
+        return try {
+            val array = JSONArray().apply {
+                groups.forEach { put(it.toJson()) }
+            }
+            setKey(KEY_GROUPS, array.toString())
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save groups", e)
+            false
+        }
+    }
+
+    /**
+     * Load collapsed group IDs.
+     */
+    fun loadCollapsedGroups(): Set<String> {
+        return try {
+            val json = getKey<String>(KEY_COLLAPSED_GROUPS) ?: return emptySet()
+            val array = JSONArray(json)
+            (0 until array.length()).map { i -> array.getString(i) }.toSet()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load collapsed groups", e)
+            emptySet()
+        }
+    }
+
+    /**
+     * Save collapsed group IDs.
+     */
+    fun saveCollapsedGroups(groupIds: Set<String>): Boolean {
+        return try {
+            val array = JSONArray().apply {
+                groupIds.forEach { put(it) }
+            }
+            setKey(KEY_COLLAPSED_GROUPS, array.toString())
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save collapsed groups", e)
+            false
+        }
+    }
+
+    /**
+     * Clear all stored data.
+     * @return true if all keys were cleared successfully, false if any operation failed
+     */
+    fun clearAll(): Boolean {
+        return try {
+            setKey(KEY_FEED_LIST, null)
+            setKey(KEY_SETTINGS, null)
+            setKey(KEY_GROUPS, null)
+            setKey(KEY_COLLAPSED_GROUPS, null)
+            // Also clear legacy keys
+            setKey(LEGACY_KEY_FEED_LIST, null)
+            setKey(LEGACY_KEY_PLUGIN_STATES, null)
+            setKey(LEGACY_KEY_SETTINGS, null)
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to clear all data", e)
+            false
+        }
     }
 }
