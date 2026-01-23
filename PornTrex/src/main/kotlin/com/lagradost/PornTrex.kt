@@ -4,6 +4,7 @@ import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.common.CustomPage
 import org.jsoup.nodes.Element
 
 class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {

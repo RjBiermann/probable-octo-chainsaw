@@ -1,6 +1,7 @@
 package com.lagradost
 
 import android.content.Context
+import com.lagradost.common.CustomPage
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin

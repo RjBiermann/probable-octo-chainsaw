@@ -1,5 +1,10 @@
 package com.lagradost
 
+import com.lagradost.common.CustomPage
+import com.lagradost.common.CustomPageItemTouchHelper
+import com.lagradost.common.CustomPagesAdapter
+import com.lagradost.common.TvFocusUtils
+import com.lagradost.common.ValidationResult
 import android.app.Dialog
 import android.content.Context
 import android.content.res.ColorStateList
@@ -9,6 +14,7 @@ import android.widget.Toast
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.TypedValue
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -51,6 +57,12 @@ class PornTrexSettingsFragment : DialogFragment() {
     private lateinit var adapter: CustomPagesAdapter
     private lateinit var emptyStateText: TextView
     private var itemTouchHelper: ItemTouchHelper? = null
+
+    // Tap-and-reorder state (TV mode only)
+    private var reorderModeButton: MaterialButton? = null
+    private var reorderSubtitle: TextView? = null
+    private var isReorderMode = false
+    private var selectedReorderPosition: Int = -1
 
     // TV mode detection - evaluated once per fragment lifecycle
     private val isTvMode by lazy { TvFocusUtils.isTvMode(requireContext()) }
@@ -283,13 +295,55 @@ class PornTrexSettingsFragment : DialogFragment() {
             }
         }
 
-        // Current Sections Header
-        val sectionsHeader = TextView(context).apply {
+        // Current Sections Header with Reorder button
+        val sectionsHeaderRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            setPadding(0, dp(context, 16), 0, dp(context, 8))
+        }
+
+        sectionsHeaderRow.addView(TextView(context).apply {
             text = "Current Sections"
             textSize = 16f
             setTextColor(textColor)
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(0, dp(context, 16), 0, dp(context, 8))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+
+        // Reorder button (TV mode only)
+        if (isTvMode) {
+            reorderModeButton = MaterialButton(
+                context,
+                null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle
+            ).apply {
+                text = "Reorder"
+                textSize = 12f
+                minimumWidth = 0
+                minimumHeight = 0
+                minWidth = 0
+                minHeight = dp(context, 32)
+                insetTop = 0
+                insetBottom = 0
+                setPadding(dp(context, 12), 0, dp(context, 12), 0)
+                strokeColor = ColorStateList.valueOf(primaryColor)
+                setTextColor(primaryColor)
+                setOnClickListener { toggleReorderMode(context) }
+                TvFocusUtils.makeFocusable(this)
+            }
+            sectionsHeaderRow.addView(reorderModeButton)
+        }
+
+        // Subtitle - changes based on reorder mode
+        reorderSubtitle = TextView(context).apply {
+            text = getReorderSubtitleText()
+            textSize = 13f
+            setTextColor(grayTextColor)
+            setPadding(0, 0, 0, dp(context, 8))
         }
 
         // Search/Filter Input
@@ -343,38 +397,20 @@ class PornTrexSettingsFragment : DialogFragment() {
                     }
                     adapter.submitList(currentPages)
                     updateEmptyState()
-                    if (isTvMode) {
-                        TvFocusUtils.enableFocusLoop(mainContainer)
+                    // Reset reorder mode when list changes
+                    if (isTvMode && isReorderMode) {
+                        isReorderMode = false
+                        selectedReorderPosition = -1
+                        adapter.setReorderMode(false, -1)
+                        reorderModeButton?.apply {
+                            text = "Reorder"
+                            backgroundTintList = ColorStateList.valueOf(0)
+                            setTextColor(primaryColor)
+                            strokeColor = ColorStateList.valueOf(primaryColor)
+                            strokeWidth = dp(context, 1)
+                        }
+                        reorderSubtitle?.text = getReorderSubtitleText()
                     }
-                }
-            },
-            onMoveUp = { position ->
-                val sourceIndex = adapter.getSourceIndex(position)
-                if (sourceIndex > 0) {
-                    java.util.Collections.swap(currentPages, sourceIndex, sourceIndex - 1)
-                    if (!saveCustomPages(context, currentPages)) {
-                        // Restore on save failure
-                        java.util.Collections.swap(currentPages, sourceIndex, sourceIndex - 1)
-                        Toast.makeText(context, "Failed to save changes", Toast.LENGTH_SHORT).show()
-                        return@CustomPagesAdapter
-                    }
-                    adapter.submitList(currentPages)
-                    if (isTvMode) {
-                        TvFocusUtils.enableFocusLoop(mainContainer)
-                    }
-                }
-            },
-            onMoveDown = { position ->
-                val sourceIndex = adapter.getSourceIndex(position)
-                if (sourceIndex >= 0 && sourceIndex < currentPages.size - 1) {
-                    java.util.Collections.swap(currentPages, sourceIndex, sourceIndex + 1)
-                    if (!saveCustomPages(context, currentPages)) {
-                        // Restore on save failure
-                        java.util.Collections.swap(currentPages, sourceIndex, sourceIndex + 1)
-                        Toast.makeText(context, "Failed to save changes", Toast.LENGTH_SHORT).show()
-                        return@CustomPagesAdapter
-                    }
-                    adapter.submitList(currentPages)
                     if (isTvMode) {
                         TvFocusUtils.enableFocusLoop(mainContainer)
                     }
@@ -382,6 +418,9 @@ class PornTrexSettingsFragment : DialogFragment() {
             },
             onStartDrag = { viewHolder ->
                 itemTouchHelper?.startDrag(viewHolder)
+            },
+            onReorderTap = { position ->
+                onPageTappedForReorder(position)
             }
         )
 
@@ -516,7 +555,8 @@ class PornTrexSettingsFragment : DialogFragment() {
         mainContainer.addView(card)
         mainContainer.addView(examplesToggle)
         mainContainer.addView(examplesText)
-        mainContainer.addView(sectionsHeader)
+        mainContainer.addView(sectionsHeaderRow)
+        mainContainer.addView(reorderSubtitle)
         mainContainer.addView(filterInputLayout)
         mainContainer.addView(emptyStateText)
         mainContainer.addView(sectionsRecyclerView)
@@ -564,6 +604,90 @@ class PornTrexSettingsFragment : DialogFragment() {
         } catch (e: Exception) {
             Log.e("PornTrexSettings", "Failed to save custom pages", e)
             false
+        }
+    }
+
+    private fun getReorderSubtitleText(): String {
+        return when {
+            isReorderMode && selectedReorderPosition >= 0 -> "Tap destination to move section"
+            isReorderMode -> "Tap a section to select, then tap destination"
+            isTvMode -> "Tap Reorder to arrange sections"
+            else -> "Drag ≡ to reorder"
+        }
+    }
+
+    private fun toggleReorderMode(context: Context) {
+        isReorderMode = !isReorderMode
+        selectedReorderPosition = -1
+
+        reorderModeButton?.apply {
+            if (isReorderMode) {
+                text = "Done"
+                backgroundTintList = ColorStateList.valueOf(primaryColor)
+                setTextColor(0xFFFFFFFF.toInt())
+                strokeWidth = 0
+            } else {
+                text = "Reorder"
+                backgroundTintList = ColorStateList.valueOf(0)
+                setTextColor(primaryColor)
+                strokeColor = ColorStateList.valueOf(primaryColor)
+                strokeWidth = dp(context, 1)
+            }
+        }
+
+        reorderSubtitle?.text = getReorderSubtitleText()
+        adapter.setReorderMode(isReorderMode, -1)
+    }
+
+    private fun onPageTappedForReorder(position: Int) {
+        if (!isReorderMode) return
+
+        val context = requireContext()
+
+        if (selectedReorderPosition < 0) {
+            // First tap - select the section
+            selectedReorderPosition = position
+            reorderSubtitle?.text = getReorderSubtitleText()
+            adapter.setReorderMode(true, position)
+            // Restore focus to the tapped item after adapter refresh
+            restoreFocusToPosition(position)
+        } else if (selectedReorderPosition == position) {
+            // Tapped same item - deselect
+            selectedReorderPosition = -1
+            reorderSubtitle?.text = getReorderSubtitleText()
+            adapter.setReorderMode(true, -1)
+            // Restore focus to the tapped item after adapter refresh
+            restoreFocusToPosition(position)
+        } else {
+            // Second tap - move the section
+            val sourceIdx = adapter.getSourceIndex(selectedReorderPosition)
+            val destIdx = adapter.getSourceIndex(position)
+
+            if (sourceIdx >= 0 && destIdx >= 0) {
+                val movedItem = currentPages.removeAt(sourceIdx)
+                val targetPosition = if (destIdx > sourceIdx) destIdx else destIdx
+                currentPages.add(targetPosition, movedItem)
+                saveCustomPages(context, currentPages)
+                adapter.submitList(currentPages)
+            }
+
+            // Reset selection
+            selectedReorderPosition = -1
+            reorderSubtitle?.text = getReorderSubtitleText()
+            adapter.setReorderMode(true, -1)
+            // Restore focus to the target position after move
+            restoreFocusToPosition(position)
+
+            if (isTvMode) {
+                TvFocusUtils.enableFocusLoop(mainContainer)
+            }
+        }
+    }
+
+    private fun restoreFocusToPosition(position: Int) {
+        sectionsRecyclerView.post {
+            val viewHolder = sectionsRecyclerView.findViewHolderForAdapterPosition(position)
+            viewHolder?.itemView?.requestFocus()
         }
     }
 

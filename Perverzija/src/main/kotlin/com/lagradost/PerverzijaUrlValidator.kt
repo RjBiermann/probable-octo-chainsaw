@@ -1,5 +1,6 @@
 package com.lagradost
 
+import com.lagradost.common.ValidationResult
 import java.net.URI
 import java.net.URLDecoder
 

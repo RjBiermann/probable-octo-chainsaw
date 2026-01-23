@@ -1,5 +1,6 @@
 package com.lagradost
 
+import com.lagradost.common.ValidationResult
 import org.junit.Assert.*
 import org.junit.Test
 

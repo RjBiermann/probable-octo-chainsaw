@@ -1,4 +1,4 @@
-version = 4
+version = 5
 
 cloudstream {
     description = "PornTrex - HD Porn Videos"
@@ -10,7 +10,6 @@ cloudstream {
 }
 
 dependencies {
-    val cloudstream by configurations
-    cloudstream("com.lagradost:cloudstream3:pre-release")
+    implementation(project(":CommonLib"))
     implementation("com.google.android.material:material:1.13.0")
 }

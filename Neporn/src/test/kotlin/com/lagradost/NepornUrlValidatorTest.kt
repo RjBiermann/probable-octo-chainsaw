@@ -1,5 +1,6 @@
 package com.lagradost
 
+import com.lagradost.common.ValidationResult
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs

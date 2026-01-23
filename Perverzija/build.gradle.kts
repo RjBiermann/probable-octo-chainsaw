@@ -1,4 +1,4 @@
-version = 2
+version = 3
 
 cloudstream {
     description = "Perverzija - Free Streaming HD Porn"
@@ -10,7 +10,6 @@ cloudstream {
 }
 
 dependencies {
-    val cloudstream by configurations
-    cloudstream("com.lagradost:cloudstream3:pre-release")
+    implementation(project(":CommonLib"))
     implementation("com.google.android.material:material:1.13.0")
 }

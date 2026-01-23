@@ -31,15 +31,22 @@ fun Project.cloudstream(configuration: CloudstreamExtension.() -> Unit) = extens
 
 fun Project.android(configuration: BaseExtension.() -> Unit) = extensions.getByName<BaseExtension>("android").configuration()
 
+// Library modules that should NOT have the cloudstream plugin applied
+val libraryModules = setOf("CommonLib")
+
 subprojects {
     apply(plugin = "com.android.library")
     apply(plugin = "kotlin-android")
-    apply(plugin = "com.lagradost.cloudstream3.gradle")
 
-    cloudstream {
-        // when running through github workflow, GITHUB_REPOSITORY should contain current repository name
-        // you can modify it to use other git hosting services, like gitlab
-        setRepo(System.getenv("GITHUB_REPOSITORY") ?: "https://github.com/user/repo")
+    // Only apply cloudstream plugin to actual plugin modules, not library modules
+    if (project.name !in libraryModules) {
+        apply(plugin = "com.lagradost.cloudstream3.gradle")
+
+        cloudstream {
+            // when running through github workflow, GITHUB_REPOSITORY should contain current repository name
+            // you can modify it to use other git hosting services, like gitlab
+            setRepo(System.getenv("GITHUB_REPOSITORY") ?: "https://github.com/user/repo")
+        }
     }
 
     android {
@@ -74,12 +81,15 @@ subprojects {
     }
 
     dependencies {
-        val cloudstream by configurations
         val implementation by configurations
         val testImplementation by configurations
 
-        // Stubs for all cloudstream classes
-        cloudstream("com.lagradost:cloudstream3:pre-release")
+        // Cloudstream stubs only for plugin modules (cloudstream configuration is created by cloudstream plugin)
+        if (project.name !in libraryModules) {
+            val cloudstream by configurations
+            // Stubs for all cloudstream classes
+            cloudstream("com.lagradost:cloudstream3:pre-release")
+        }
 
         // These dependencies can include any of those which are added by the app,
         // but you don't need to include any of them if you don't need them.
@@ -95,6 +105,29 @@ subprojects {
         testImplementation("junit:junit:4.13.2")
         testImplementation("org.jetbrains.kotlin:kotlin-test:2.3.0")
         testImplementation("io.mockk:mockk:1.13.8")
+    }
+
+    // Auto-configure CommonLib class bundling for plugins that depend on it
+    // This is needed because the cloudstream gradle plugin only DEX-compiles
+    // classes from the current module, not from project dependencies
+    afterEvaluate {
+        if (project.name !in libraryModules) {
+            val hasCommonLibDep = configurations.findByName("implementation")
+                ?.dependencies?.any {
+                    it is org.gradle.api.artifacts.ProjectDependency && it.name == "CommonLib"
+                } == true
+
+            if (hasCommonLibDep) {
+                tasks.register<Copy>("copyCommonLibClasses") {
+                    dependsOn("compileDebugKotlin", ":CommonLib:compileDebugKotlin")
+                    from(project(":CommonLib").layout.buildDirectory.dir("tmp/kotlin-classes/debug"))
+                    into(layout.buildDirectory.dir("tmp/kotlin-classes/debug"))
+                }
+                tasks.named("compileDex") {
+                    dependsOn("copyCommonLibClasses")
+                }
+            }
+        }
     }
 }
 

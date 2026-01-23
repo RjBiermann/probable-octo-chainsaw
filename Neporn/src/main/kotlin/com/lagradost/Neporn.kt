@@ -1,6 +1,7 @@
 package com.lagradost
 
 import com.lagradost.cloudstream3.*
+import com.lagradost.common.CustomPage
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element

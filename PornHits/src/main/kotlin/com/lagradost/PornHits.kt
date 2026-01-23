@@ -3,6 +3,7 @@ package com.lagradost
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.common.CustomPage
 import org.json.JSONException
 import org.json.JSONObject
 import org.jsoup.nodes.Element
