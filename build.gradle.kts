@@ -104,7 +104,7 @@ subprojects {
         // Test dependencies
         testImplementation("junit:junit:4.13.2")
         testImplementation("org.jetbrains.kotlin:kotlin-test:2.1.20")
-        testImplementation("io.mockk:mockk:1.13.8")
+        testImplementation("io.mockk:mockk:1.14.7")
     }
 
     // Auto-configure CommonLib class bundling for plugins that depend on it
