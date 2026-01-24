@@ -32,10 +32,10 @@ CI uses `--parallel --build-cache --no-daemon` flags for optimal performance.
 
 ## CI/CD
 
-**Automatic version bumping**: When PRs merge to master, the build workflow:
-- Bumps versions for modified plugins (compares HEAD~1)
+**Automatic version bumping**: When code is pushed to master, the build workflow:
+- Bumps versions for modified plugins (uses `github.event.before/after` for accurate diff)
 - Bumps ALL plugins if CommonLib changes
-- Skip with `no-version-bump` PR label
+- Skip with `[skip-bump]` in commit message
 
 **Branch protection**: If master has protection, add `github-actions[bot]` to bypass list for version bump commits.
 
@@ -187,8 +187,8 @@ Test dependencies: JUnit 4, kotlin-test, mockk
 ## Version Compatibility
 
 AGP, Kotlin, and Gradle versions must be compatible:
-- Current: Kotlin 2.1.20, AGP 8.13.2, Gradle 8.13+
-- Kotlin 2.1.x works with AGP 8.x
+- Current: Kotlin 2.3.0, AGP 8.13.2, Gradle 8.13+
+- Kotlin 2.3.x works with AGP 8.x
 - AGP 8.13.x requires Gradle 8.13+
 - Check https://developer.android.com/build/kotlin-support for compatibility matrix
 
@@ -202,9 +202,7 @@ Tests focus on URL validation (pure Kotlin, no Android deps). `unitTests.isRetur
 
 ### CodeQL Compatibility
 
-CodeQL requires Kotlin version < 2.2.30. If CodeQL fails with "Kotlin version too new", downgrade in `build.gradle.kts`:
-- `kotlin-gradle-plugin` (buildscript dependencies)
-- `kotlin-test` (test dependencies)
+CodeQL may fail if the Kotlin version is too new. However, the `cloudstream3:pre-release` dependency dictates the minimum Kotlin version required. Prioritize matching cloudstream's Kotlin version over CodeQL compatibility.
 
 ### Kotlin Version Mismatch
 

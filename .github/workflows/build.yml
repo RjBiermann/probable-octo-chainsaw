@@ -7,16 +7,13 @@ concurrency:
 
 on:
   workflow_dispatch:  # Manual builds (no version bump)
-  pull_request:
-    types: [closed]
+  push:
     branches:
       - master
       - main
 
 jobs:
   build:
-    # Run on manual dispatch OR when PR is merged (not just closed)
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Needed to push version bump commits
@@ -25,28 +22,42 @@ jobs:
         uses: actions/checkout@v4.2.2
         with:
           path: "src"
-          fetch-depth: 2  # Need history to compare versions
+          fetch-depth: 0  # Full history for accurate diff comparison
 
-      - name: Check for skip label
+      - name: Check for skip in commit message
         id: skip-check
-        if: github.event_name == 'pull_request'
-        env:
-          HAS_SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no-version-bump') }}
+        if: github.event_name == 'push'
+        working-directory: src
         run: |
-          if [[ "$HAS_SKIP_LABEL" == "true" ]]; then
+          commit_msg=$(git log -1 --pretty=%B)
+          if echo "$commit_msg" | grep -qi "\[skip-bump\]"; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "::notice::Skipping version bump due to 'no-version-bump' label"
+            echo "::notice::Skipping version bump due to [skip-bump] in commit message"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Bump plugin versions
         id: bump-versions
-        if: github.event_name == 'pull_request' && steps.skip-check.outputs.skip != 'true'
+        if: github.event_name == 'push' && steps.skip-check.outputs.skip != 'true'
         working-directory: src
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
         run: |
-          # Get list of changed files in the merge
-          changed_files=$(git diff --name-only HEAD~1 HEAD)
+          # Use push event refs for accurate diff (handles queued builds correctly)
+          if [[ "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+            # New branch - compare against parent
+            changed_files=$(git diff --name-only HEAD~1 HEAD) || {
+              echo "::error::Failed to get changed files for new branch"
+              exit 1
+            }
+          else
+            changed_files=$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA") || {
+              echo "::error::Failed to get changed files between $BEFORE_SHA and $AFTER_SHA"
+              exit 1
+            }
+          fi
           echo "Changed files:"
           echo "$changed_files"
 
@@ -65,7 +76,12 @@ jobs:
               plugins+=("$dir_name")
             fi
           done
-          echo "Found plugins: ${plugins[*]}"
+
+          if [[ ${#plugins[@]} -eq 0 ]]; then
+            echo "::error::No plugins found in repository. Expected directories with build.gradle.kts files."
+            exit 1
+          fi
+          echo "Found ${#plugins[@]} plugins: ${plugins[*]}"
 
           # Determine which plugins to bump
           plugins_to_bump=()
@@ -94,14 +110,19 @@ jobs:
           for plugin in "${plugins_to_bump[@]}"; do
             gradle_file="$plugin/build.gradle.kts"
 
-            # Get the version from BEFORE the merge (HEAD~1)
-            # Capture both stdout and stderr to distinguish "file doesn't exist" from other errors
-            git_output=$(git show HEAD~1:"$gradle_file" 2>&1)
-            git_exit_code=$?
+            # Get the version from BEFORE the push
+            # Use BEFORE_SHA for accuracy, fall back to HEAD~1 for new branches
+            if [[ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+              git_output=$(git show "$BEFORE_SHA":"$gradle_file" 2>&1)
+              git_exit_code=$?
+            else
+              git_output=$(git show HEAD~1:"$gradle_file" 2>&1)
+              git_exit_code=$?
+            fi
 
             if [[ $git_exit_code -ne 0 ]]; then
               if echo "$git_output" | grep -q "does not exist\|path .* does not exist"; then
-                # New plugin - file didn't exist before this PR
+                # New plugin - file didn't exist before this push
                 echo "::notice::$plugin is a new plugin, starting at version 1"
                 old_version=0
               else
@@ -111,22 +132,25 @@ jobs:
               fi
             else
               # Strip quotes and whitespace, handle formats: version = 3, version=3, version = "3"
-              old_version=$(echo "$git_output" | grep -E "^version[[:space:]]*=" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' "'"'" )
+              old_version=$(echo "$git_output" | grep -E "^version[[:space:]]*=" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' "'"'" | head -1)
 
-              # Validate numeric, default to 0 if not
+              # Validate numeric - fail if unparseable for existing files
               if ! [[ "$old_version" =~ ^[0-9]+$ ]]; then
-                echo "::warning::Could not parse version for $plugin (got '$old_version'), starting at 1"
-                old_version=0
+                echo "::error::Could not parse version for $plugin (got '$old_version'). Check build.gradle.kts format."
+                exit 1
               fi
             fi
 
             new_version=$((old_version + 1))
 
-            # Update the version in the file (override any manual changes)
-            sed -i -E "s/^version[[:space:]]*=.*/version = $new_version/" "$gradle_file"
+            # Update the version in the file
+            if ! sed -i -E "s/^version[[:space:]]*=.*/version = $new_version/" "$gradle_file"; then
+              echo "::error::sed failed to update version in $gradle_file"
+              exit 1
+            fi
 
             # Verify the update succeeded
-            actual_version=$(grep -E "^version[[:space:]]*=" "$gradle_file" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' ')
+            actual_version=$(grep -E "^version[[:space:]]*=" "$gradle_file" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' ' | head -1)
             if [[ "$actual_version" != "$new_version" ]]; then
               echo "::error::Failed to update version in $gradle_file (expected $new_version, got '$actual_version')"
               exit 1
@@ -144,13 +168,20 @@ jobs:
         working-directory: src
         env:
           BUMPED_PLUGINS: ${{ steps.bump-versions.outputs.bumped_plugins }}
-          TARGET_BRANCH: ${{ github.event.pull_request.base.ref }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Stage only build.gradle.kts files
-          git add */build.gradle.kts
+          # Stage only build.gradle.kts files for bumped plugins
+          # Use BUMPED_PLUGINS which contains space-separated plugin names
+          for plugin in $BUMPED_PLUGINS; do
+            if [[ -f "$plugin/build.gradle.kts" ]]; then
+              git add "$plugin/build.gradle.kts"
+            else
+              echo "::error::Expected file not found: $plugin/build.gradle.kts"
+              exit 1
+            fi
+          done
 
           # Verify files were staged
           if git diff --cached --quiet; then
@@ -158,11 +189,19 @@ jobs:
             exit 1
           fi
 
-          # Create commit with list of bumped plugins (env var avoids injection)
-          git commit -m "chore: bump plugin versions for:${BUMPED_PLUGINS}"
+          # Create commit with list of bumped plugins
+          # Include [skip-bump] to prevent infinite loop
+          if ! git commit -m "chore: bump plugin versions for:${BUMPED_PLUGINS} [skip-bump]"; then
+            echo "::error::Failed to commit version bump"
+            exit 1
+          fi
 
-          # Push to the target branch explicitly
-          git push origin "HEAD:${TARGET_BRANCH}"
+          # Push to current branch
+          if ! git push; then
+            echo "::error::Failed to push version bump. Check branch protection settings."
+            echo "::error::Add 'github-actions[bot]' to bypass list if branch is protected."
+            exit 1
+          fi
 
       - name: Checkout builds
         uses: actions/checkout@v4.2.2
@@ -175,7 +214,10 @@ jobs:
           shopt -s nullglob
           cs3_files=("$GITHUB_WORKSPACE"/builds/*.cs3)
           if [[ ${#cs3_files[@]} -gt 0 ]]; then
-            rm "${cs3_files[@]}"
+            rm "${cs3_files[@]}" || {
+              echo "::error::Failed to remove old .cs3 files"
+              exit 1
+            }
             echo "Removed ${#cs3_files[@]} old .cs3 files"
           else
             echo "No old .cs3 files to clean"
@@ -195,19 +237,44 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/src"
           chmod +x gradlew
-          ./gradlew make makePluginsJson --parallel --build-cache --no-daemon
 
-          # Copy build artifacts with proper error handling
+          # Run gradle build with explicit error check
+          if ! ./gradlew make makePluginsJson --parallel --build-cache --no-daemon; then
+            echo "::error::Gradle build failed"
+            exit 1
+          fi
+
+          # Verify builds directory exists
+          if [[ ! -d "$GITHUB_WORKSPACE/builds" ]]; then
+            echo "::error::Builds directory does not exist"
+            exit 1
+          fi
+
+          # Copy .cs3 files with verification
           shopt -s nullglob globstar
           cs3_files=(**/build/*.cs3)
           if [[ ${#cs3_files[@]} -eq 0 ]]; then
             echo "::error::No .cs3 files were produced by the build"
             exit 1
           fi
-          cp "${cs3_files[@]}" "$GITHUB_WORKSPACE/builds"
+
+          if ! cp "${cs3_files[@]}" "$GITHUB_WORKSPACE/builds"; then
+            echo "::error::Failed to copy .cs3 files to builds directory"
+            exit 1
+          fi
           echo "Copied ${#cs3_files[@]} plugin files"
 
-          cp build/plugins.json "$GITHUB_WORKSPACE/builds"
+          # Copy plugins.json with verification
+          if [[ ! -f build/plugins.json ]]; then
+            echo "::error::plugins.json was not generated by the build"
+            exit 1
+          fi
+
+          if ! cp build/plugins.json "$GITHUB_WORKSPACE/builds"; then
+            echo "::error::Failed to copy plugins.json to builds directory"
+            exit 1
+          fi
+          echo "Copied plugins.json"
         # Note: --configuration-cache not used because Cloudstream gradle plugin
         # tasks (make, deployWithAdb) are incompatible with it
         # --no-daemon prevents orphan Java processes in CI
@@ -218,5 +285,34 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit --amend -m "Build $GITHUB_SHA" || exit 0  # do not error if nothing to commit
-          git push --force
+
+          # Check if there are changes to commit
+          if git diff --cached --quiet; then
+            echo "::notice::No changes to commit to builds branch"
+            exit 0
+          fi
+
+          # Check if branch has commits (for amend vs initial commit)
+          has_commits=false
+          if git rev-parse HEAD >/dev/null 2>&1; then
+            has_commits=true
+          fi
+
+          if [[ "$has_commits" == "true" ]]; then
+            if ! git commit --amend -m "Build $GITHUB_SHA"; then
+              echo "::error::Failed to amend build commit"
+              exit 1
+            fi
+          else
+            echo "::notice::Builds branch is new, creating initial commit"
+            if ! git commit -m "Build $GITHUB_SHA"; then
+              echo "::error::Failed to create initial build commit"
+              exit 1
+            fi
+          fi
+
+          if ! git push --force; then
+            echo "::error::Failed to push builds branch"
+            exit 1
+          fi
+          echo "Successfully pushed builds"
