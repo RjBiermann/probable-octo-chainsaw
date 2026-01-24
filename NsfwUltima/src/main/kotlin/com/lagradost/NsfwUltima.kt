@@ -29,7 +29,10 @@ class NsfwUltima(val plugin: NsfwUltimaPlugin) : MainAPI() {
      * Initialize by loading feed list and settings.
      */
     fun initialize() {
-        if (initialized) return
+        if (initialized) {
+            Log.d(TAG, "initialize() skipped - already initialized")
+            return
+        }
 
         cachedSettings = NsfwUltimaStorage.loadSettings()
         cachedFeedList = NsfwUltimaStorage.loadFeedList()
@@ -42,7 +45,7 @@ class NsfwUltima(val plugin: NsfwUltimaPlugin) : MainAPI() {
         }
 
         initialized = true
-        Log.d(TAG, "Initialized with ${cachedFeedList.size} feeds")
+        Log.d(TAG, "Initialized with ${cachedFeedList.size} feeds. First 3: [${cachedFeedList.toPreviewString()}]")
     }
 
     /**
@@ -51,7 +54,7 @@ class NsfwUltima(val plugin: NsfwUltimaPlugin) : MainAPI() {
     fun refreshFeedList() {
         cachedSettings = NsfwUltimaStorage.loadSettings()
         cachedFeedList = NsfwUltimaStorage.loadFeedList()
-        Log.d(TAG, "Refreshed feed list: ${cachedFeedList.size} feeds")
+        Log.d(TAG, "Refreshed feed list: ${cachedFeedList.size} feeds. First 3: [${cachedFeedList.toPreviewString()}]")
     }
 
     /**
@@ -109,6 +112,8 @@ class NsfwUltima(val plugin: NsfwUltimaPlugin) : MainAPI() {
                     )
                 )
             }
+
+            Log.d(TAG, "mainPage getter called. First 3 feeds: [${cachedFeedList.toPreviewString()}]")
 
             return cachedFeedList.map { feed ->
                 val displayName = if (cachedSettings.showPluginNames) {

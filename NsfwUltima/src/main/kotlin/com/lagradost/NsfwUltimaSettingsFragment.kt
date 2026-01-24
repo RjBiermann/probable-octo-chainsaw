@@ -18,8 +18,8 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.widget.NestedScrollView
 import androidx.fragment.app.DialogFragment
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -522,6 +522,8 @@ class NsfwUltimaSettingsFragment(
                     Log.e(TAG, "Failed to save groups from group manager")
                     showSaveErrorToast()
                 }
+                // Reorder feeds to match group order (grouped first, then ungrouped)
+                reorderFeedsByGroupOrder()
                 // Refresh the grouped view and options to reflect changes
                 refreshGroupedView()
                 context?.let { rebuildGroupingOptions(it) }
@@ -534,6 +536,7 @@ class NsfwUltimaSettingsFragment(
                     showSaveErrorToast()
                 }
                 refreshGroupedView()
+                updateEmptyState()
                 updateFeedListHeader()
                 context?.let { rebuildGroupingOptions(it) }
                 plugin.nsfwUltima?.refreshFeedList()
@@ -567,17 +570,30 @@ class NsfwUltimaSettingsFragment(
     }
 
     private fun updateFeedListHeader() {
-        // Update subtitle based on reorder state
-        reorderSubtitle.text = when {
-            isReorderMode && selectedReorderPosition >= 0 ->
-                "Tap destination to move feed"
-            isReorderMode ->
-                "Tap a feed to select, then tap destination"
-            isTvMode ->
-                "Drag ≡ to reorder, or tap Reorder button"
-            else ->
-                "Drag ≡ to reorder"
+        reorderSubtitle.text = getReorderSubtitleText()
+    }
+
+    /**
+     * Reorder feedList so grouped feeds come first (in group order), then ungrouped feeds.
+     * This ensures the homepage displays feeds in the order users expect based on group arrangement.
+     */
+    private fun reorderFeedsByGroupOrder() {
+        val groupIds = feedGroups.map { it.id }.toSet()
+
+        // Collect feeds in group order, then add ungrouped at the end
+        val groupedFeeds = feedGroups.flatMap { group ->
+            feedList.filter { it.groupId == group.id }
         }
+        val ungroupedFeeds = feedList.filter { it.groupId == null || it.groupId !in groupIds }
+
+        feedList.clear()
+        feedList.addAll(groupedFeeds + ungroupedFeeds)
+
+        if (!NsfwUltimaStorage.saveFeedList(feedList)) {
+            Log.e(TAG, "Failed to save reordered feed list")
+            showSaveErrorToast()
+        }
+        plugin.nsfwUltima?.refreshFeedList()
     }
 
     private fun refreshGroupedView() {
@@ -663,6 +679,8 @@ class NsfwUltimaSettingsFragment(
         val newOrder = groupedFeedAdapter.getItems()
             .filterIsInstance<GroupedFeedItem.Feed>()
             .map { it.item }
+
+        Log.d(TAG, "syncFeedListFromAdapter: BEFORE=[${feedList.toPreviewString()}], AFTER=[${newOrder.toPreviewString()}]")
 
         feedList.clear()
         feedList.addAll(newOrder)
@@ -829,8 +847,8 @@ class NsfwUltimaSettingsFragment(
         dialog.updateAddedFeeds(feedList)
         // Restore focus to Manage Feeds button when dialog closes (TV mode)
         if (isTvMode) {
-            dialog.lifecycle.addObserver(object : DefaultLifecycleObserver {
-                override fun onDestroy(owner: LifecycleOwner) {
+            dialog.lifecycle.addObserver(LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_DESTROY) {
                     if (isAdded && view != null) {
                         manageFeedsButton?.post {
                             if (isAdded && manageFeedsButton?.isAttachedToWindow == true) {

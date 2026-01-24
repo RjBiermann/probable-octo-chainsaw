@@ -34,9 +34,11 @@ object NsfwUltimaStorage {
                 ?: getKey<String>(LEGACY_KEY_FEED_LIST)
                 ?: return emptyList()
             val array = JSONArray(json)
-            (0 until array.length()).mapNotNull { i ->
+            val feeds = (0 until array.length()).mapNotNull { i ->
                 FeedItem.fromJson(array.getJSONObject(i))
             }
+            Log.d(TAG, "Loaded ${feeds.size} feeds. First 3: [${feeds.toPreviewString()}]")
+            feeds
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load feed list", e)
             emptyList()
@@ -51,6 +53,7 @@ object NsfwUltimaStorage {
             val array = JSONArray().apply {
                 feeds.forEach { put(it.toJson()) }
             }
+            Log.d(TAG, "Saving ${feeds.size} feeds. First 3: [${feeds.toPreviewString()}]")
             setKey(KEY_FEED_LIST, array.toString())
             // Clear legacy key if it exists
             setKey(LEGACY_KEY_FEED_LIST, null)

@@ -249,3 +249,10 @@ data class AvailableFeed(
     fun toFeedItem(): FeedItem = FeedItem(pluginName, sectionName, sectionData)
     fun key(): String = "$pluginName::$sectionName::$sectionData"
 }
+
+/**
+ * Extension function to create a preview string for logging feed lists.
+ * Shows the first few feeds in "plugin:section" format.
+ */
+fun List<FeedItem>.toPreviewString(count: Int = 3): String =
+    take(count).joinToString(", ") { "${it.pluginName}:${it.sectionName}" }
