@@ -1,5 +1,7 @@
 package com.lagradost
 
+import com.lagradost.cloudstream3.AcraApplication.Companion.getKey
+import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
 import com.lagradost.common.CustomPage
 import com.lagradost.common.CustomPageItemTouchHelper
 import com.lagradost.common.CustomPagesAdapter
@@ -10,6 +12,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.TypedValue
@@ -36,9 +39,6 @@ import com.google.android.material.textfield.TextInputLayout
 class PornXpSettingsFragment : DialogFragment() {
 
     companion object {
-        private const val PREFS_NAME = "pornxp_plugin_prefs"
-        private const val KEY_CUSTOM_PAGES = "custom_pages"
-
         private val EXAMPLES = """
             Examples of pages you can add:
             • Studios: pornxp.ph/tags/EvilAngel
@@ -383,8 +383,12 @@ class PornXpSettingsFragment : DialogFragment() {
             onRemove = { position ->
                 val sourceIndex = adapter.getSourceIndex(position)
                 if (sourceIndex >= 0) {
-                    currentPages.removeAt(sourceIndex)
-                    saveCustomPages(context, currentPages)
+                    val removed = currentPages.removeAt(sourceIndex)
+                    if (!saveCustomPages(context, currentPages)) {
+                        currentPages.add(sourceIndex, removed)
+                        Toast.makeText(context, "Failed to save changes", Toast.LENGTH_SHORT).show()
+                        return@CustomPagesAdapter
+                    }
                     adapter.submitList(currentPages)
                     updateEmptyState()
                     // Reset reorder mode when list changes
@@ -432,9 +436,15 @@ class PornXpSettingsFragment : DialogFragment() {
                 val newItems = adapter.getItems()
                 // Guard against accidental data loss from empty adapter
                 if (newItems.isNotEmpty() || currentPages.isEmpty()) {
+                    val oldItems = currentPages.toList()
                     currentPages.clear()
                     currentPages.addAll(newItems)
-                    saveCustomPages(context, currentPages)
+                    if (!saveCustomPages(context, currentPages)) {
+                        currentPages.clear()
+                        currentPages.addAll(oldItems)
+                        adapter.submitList(currentPages)
+                        Toast.makeText(context, "Failed to save changes", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             itemTouchHelper = ItemTouchHelper(touchHelperCallback)
@@ -507,7 +517,11 @@ class PornXpSettingsFragment : DialogFragment() {
                 val newPage = CustomPage(result.path, label)
                 if (currentPages.none { it.path == newPage.path }) {
                     currentPages.add(newPage)
-                    saveCustomPages(context, currentPages)
+                    if (!saveCustomPages(context, currentPages)) {
+                        currentPages.removeAt(currentPages.size - 1)
+                        statusText.text = "Failed to save. Please try again."
+                        return@setOnClickListener
+                    }
                     urlInput.text?.clear()
                     labelInput.text?.clear()
                     labelInputLayout.visibility = View.GONE
@@ -560,20 +574,26 @@ class PornXpSettingsFragment : DialogFragment() {
         emptyStateText.text = if (adapter.isFiltered()) "(no matches)" else "(none added)"
     }
 
-    private fun loadCustomPages(context: Context): List<CustomPage> {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val json = prefs.getString(KEY_CUSTOM_PAGES, "[]") ?: "[]"
+    private fun loadCustomPages(@Suppress("UNUSED_PARAMETER") context: Context): List<CustomPage> {
         return try {
+            val json = getKey<String>(PornXpPlugin.STORAGE_KEY) ?: return emptyList()
             CustomPage.listFromJson(json)
         } catch (e: Exception) {
-            Log.e("PornXpSettings", "Failed to parse custom pages", e)
+            Log.e("PornXpSettings", "Failed to load custom pages (${e.javaClass.simpleName})", e)
             emptyList()
         }
     }
 
-    private fun saveCustomPages(context: Context, pages: List<CustomPage>) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_CUSTOM_PAGES, CustomPage.listToJson(pages)).apply()
+    private fun saveCustomPages(@Suppress("UNUSED_PARAMETER") context: Context, pages: List<CustomPage>): Boolean {
+        return try {
+            val json = CustomPage.listToJson(pages)
+            setKey(PornXpPlugin.STORAGE_KEY, json)
+            // Verify write succeeded
+            getKey<String>(PornXpPlugin.STORAGE_KEY) == json
+        } catch (e: Exception) {
+            Log.e("PornXpSettings", "Failed to save custom pages (${e.javaClass.simpleName})", e)
+            false
+        }
     }
 
     private fun getReorderSubtitleText(): String {
@@ -634,9 +654,12 @@ class PornXpSettingsFragment : DialogFragment() {
 
             if (sourceIdx >= 0 && destIdx >= 0) {
                 val movedItem = currentPages.removeAt(sourceIdx)
-                val targetPosition = if (destIdx > sourceIdx) destIdx else destIdx
-                currentPages.add(targetPosition, movedItem)
-                saveCustomPages(context, currentPages)
+                currentPages.add(destIdx, movedItem)
+                if (!saveCustomPages(context, currentPages)) {
+                    currentPages.removeAt(destIdx)
+                    currentPages.add(sourceIdx, movedItem)
+                    Toast.makeText(context, "Failed to save changes", Toast.LENGTH_SHORT).show()
+                }
                 adapter.submitList(currentPages)
             }
 
