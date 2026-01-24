@@ -15,7 +15,7 @@ buildscript {
         classpath("com.android.tools.build:gradle:8.13.2")
         // Cloudstream gradle plugin which makes everything work and builds plugins
         classpath("com.github.recloudstream:gradle:master-SNAPSHOT")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.0")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.20")
     }
 }
 
@@ -103,7 +103,7 @@ subprojects {
 
         // Test dependencies
         testImplementation("junit:junit:4.13.2")
-        testImplementation("org.jetbrains.kotlin:kotlin-test:2.3.0")
+        testImplementation("org.jetbrains.kotlin:kotlin-test:2.1.20")
         testImplementation("io.mockk:mockk:1.13.8")
     }
 

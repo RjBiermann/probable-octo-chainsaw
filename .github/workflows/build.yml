@@ -1,37 +1,185 @@
 name: Build
 
 # https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions#concurrency
-concurrency: 
+concurrency:
   group: "build"
-  cancel-in-progress: true
+  cancel-in-progress: false  # Queue builds to avoid losing version bumps
 
 on:
-  workflow_dispatch:
-  push:
+  workflow_dispatch:  # Manual builds (no version bump)
+  pull_request:
+    types: [closed]
     branches:
-      # choose your default branch
       - master
       - main
-    paths-ignore:
-      - '*.md'
 
 jobs:
   build:
+    # Run on manual dispatch OR when PR is merged (not just closed)
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed to push version bump commits
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
         with:
           path: "src"
+          fetch-depth: 2  # Need history to compare versions
+
+      - name: Check for skip label
+        id: skip-check
+        if: github.event_name == 'pull_request'
+        env:
+          HAS_SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no-version-bump') }}
+        run: |
+          if [[ "$HAS_SKIP_LABEL" == "true" ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::notice::Skipping version bump due to 'no-version-bump' label"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump plugin versions
+        id: bump-versions
+        if: github.event_name == 'pull_request' && steps.skip-check.outputs.skip != 'true'
+        working-directory: src
+        run: |
+          # Get list of changed files in the merge
+          changed_files=$(git diff --name-only HEAD~1 HEAD)
+          echo "Changed files:"
+          echo "$changed_files"
+
+          # Check if CommonLib was modified
+          commonlib_changed=false
+          if echo "$changed_files" | grep -q "^CommonLib/"; then
+            commonlib_changed=true
+            echo "::notice::CommonLib changed - will bump ALL plugins"
+          fi
+
+          # Find all plugin directories (directories with build.gradle.kts, excluding root and CommonLib)
+          plugins=()
+          for dir in */; do
+            dir_name="${dir%/}"
+            if [[ -f "$dir_name/build.gradle.kts" && "$dir_name" != "CommonLib" ]]; then
+              plugins+=("$dir_name")
+            fi
+          done
+          echo "Found plugins: ${plugins[*]}"
+
+          # Determine which plugins to bump
+          plugins_to_bump=()
+          if [[ "$commonlib_changed" == "true" ]]; then
+            # Bump all plugins if CommonLib changed
+            plugins_to_bump=("${plugins[@]}")
+          else
+            # Only bump plugins that had changes
+            for plugin in "${plugins[@]}"; do
+              if echo "$changed_files" | grep -q "^$plugin/"; then
+                plugins_to_bump+=("$plugin")
+              fi
+            done
+          fi
+
+          if [[ ${#plugins_to_bump[@]} -eq 0 ]]; then
+            echo "No plugins to bump"
+            echo "bumped=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Plugins to bump: ${plugins_to_bump[*]}"
+          bumped_list=""
+
+          # Bump each plugin
+          for plugin in "${plugins_to_bump[@]}"; do
+            gradle_file="$plugin/build.gradle.kts"
+
+            # Get the version from BEFORE the merge (HEAD~1)
+            # Capture both stdout and stderr to distinguish "file doesn't exist" from other errors
+            git_output=$(git show HEAD~1:"$gradle_file" 2>&1)
+            git_exit_code=$?
+
+            if [[ $git_exit_code -ne 0 ]]; then
+              if echo "$git_output" | grep -q "does not exist\|path .* does not exist"; then
+                # New plugin - file didn't exist before this PR
+                echo "::notice::$plugin is a new plugin, starting at version 1"
+                old_version=0
+              else
+                # Unexpected git error - fail loudly
+                echo "::error::Git error for $plugin: $git_output"
+                exit 1
+              fi
+            else
+              # Strip quotes and whitespace, handle formats: version = 3, version=3, version = "3"
+              old_version=$(echo "$git_output" | grep -E "^version[[:space:]]*=" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' "'"'" )
+
+              # Validate numeric, default to 0 if not
+              if ! [[ "$old_version" =~ ^[0-9]+$ ]]; then
+                echo "::warning::Could not parse version for $plugin (got '$old_version'), starting at 1"
+                old_version=0
+              fi
+            fi
+
+            new_version=$((old_version + 1))
+
+            # Update the version in the file (override any manual changes)
+            sed -i -E "s/^version[[:space:]]*=.*/version = $new_version/" "$gradle_file"
+
+            # Verify the update succeeded
+            actual_version=$(grep -E "^version[[:space:]]*=" "$gradle_file" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' ')
+            if [[ "$actual_version" != "$new_version" ]]; then
+              echo "::error::Failed to update version in $gradle_file (expected $new_version, got '$actual_version')"
+              exit 1
+            fi
+
+            echo "  $plugin: $old_version -> $new_version"
+            bumped_list="$bumped_list $plugin"
+          done
+
+          echo "bumped=true" >> $GITHUB_OUTPUT
+          echo "bumped_plugins=$bumped_list" >> $GITHUB_OUTPUT
+
+      - name: Commit and push version bump
+        if: steps.bump-versions.outputs.bumped == 'true'
+        working-directory: src
+        env:
+          BUMPED_PLUGINS: ${{ steps.bump-versions.outputs.bumped_plugins }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Stage only build.gradle.kts files
+          git add */build.gradle.kts
+
+          # Verify files were staged
+          if git diff --cached --quiet; then
+            echo "::error::No version changes were staged - this should not happen"
+            exit 1
+          fi
+
+          # Create commit with list of bumped plugins (env var avoids injection)
+          git commit -m "chore: bump plugin versions for:${BUMPED_PLUGINS}"
+
+          # Push to the target branch explicitly
+          git push origin "HEAD:${TARGET_BRANCH}"
 
       - name: Checkout builds
         uses: actions/checkout@v4.2.2
         with:
           ref: "builds"
           path: "builds"
-      
+
       - name: Clean old builds
-        run: rm $GITHUB_WORKSPACE/builds/*.cs3 || true
+        run: |
+          shopt -s nullglob
+          cs3_files=("$GITHUB_WORKSPACE"/builds/*.cs3)
+          if [[ ${#cs3_files[@]} -gt 0 ]]; then
+            rm "${cs3_files[@]}"
+            echo "Removed ${#cs3_files[@]} old .cs3 files"
+          else
+            echo "No old .cs3 files to clean"
+          fi
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4.7.1
@@ -43,34 +191,32 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3.2.2
 
-      - name: Cache Gradle build cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches/build-cache-*
-            ~/.gradle/caches/transforms-*
-            ~/.gradle/native
-            ~/.gradle/wrapper
-          key: gradle-build-cache-${{ hashFiles('**/*.gradle.kts', 'gradle.properties') }}
-          restore-keys: |
-            gradle-build-cache-
-
       - name: Build Plugins
         run: |
-          cd $GITHUB_WORKSPACE/src
+          cd "$GITHUB_WORKSPACE/src"
           chmod +x gradlew
           ./gradlew make makePluginsJson --parallel --build-cache --no-daemon
-          cp **/build/*.cs3 $GITHUB_WORKSPACE/builds
-          cp build/plugins.json $GITHUB_WORKSPACE/builds
+
+          # Copy build artifacts with proper error handling
+          shopt -s nullglob globstar
+          cs3_files=(**/build/*.cs3)
+          if [[ ${#cs3_files[@]} -eq 0 ]]; then
+            echo "::error::No .cs3 files were produced by the build"
+            exit 1
+          fi
+          cp "${cs3_files[@]}" "$GITHUB_WORKSPACE/builds"
+          echo "Copied ${#cs3_files[@]} plugin files"
+
+          cp build/plugins.json "$GITHUB_WORKSPACE/builds"
         # Note: --configuration-cache not used because Cloudstream gradle plugin
         # tasks (make, deployWithAdb) are incompatible with it
         # --no-daemon prevents orphan Java processes in CI
 
       - name: Push builds
         run: |
-          cd $GITHUB_WORKSPACE/builds
-          git config --local user.email "actions@github.com"
-          git config --local user.name "GitHub Actions"
+          cd "$GITHUB_WORKSPACE/builds"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit --amend -m "Build $GITHUB_SHA" || exit 0   # do not error if nothing to commit
+          git commit --amend -m "Build $GITHUB_SHA" || exit 0  # do not error if nothing to commit
           git push --force
