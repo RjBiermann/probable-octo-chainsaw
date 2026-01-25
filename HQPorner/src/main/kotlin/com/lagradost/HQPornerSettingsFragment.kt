@@ -141,7 +141,9 @@ class HQPornerSettingsFragment : DialogFragment() {
         // Request initial focus on TV after dialog is shown
         if (isTvMode) {
             dialog?.window?.decorView?.post {
-                TvFocusUtils.requestInitialFocus(mainContainer)
+                if (isAdded && ::mainContainer.isInitialized && mainContainer.isAttachedToWindow) {
+                    TvFocusUtils.requestInitialFocus(mainContainer)
+                }
             }
         }
     }
@@ -453,21 +455,6 @@ class HQPornerSettingsFragment : DialogFragment() {
             itemTouchHelper?.attachToRecyclerView(sectionsRecyclerView)
         }
 
-        // Close Button
-        val closeButton = MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(context, 24) }
-            text = "Close"
-            strokeColor = ColorStateList.valueOf(grayTextColor)
-        }
-
-        // Apply TV focus handling to close button
-        if (isTvMode) {
-            TvFocusUtils.makeFocusable(closeButton)
-        }
-
         // Wire up URL validation
         urlInput.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -541,9 +528,6 @@ class HQPornerSettingsFragment : DialogFragment() {
             }
         }
 
-        // Wire up close button
-        closeButton.setOnClickListener { dismiss() }
-
         // Build view hierarchy
         mainContainer.addView(title)
         mainContainer.addView(card)
@@ -554,7 +538,6 @@ class HQPornerSettingsFragment : DialogFragment() {
         mainContainer.addView(filterInputLayout)
         mainContainer.addView(emptyStateText)
         mainContainer.addView(sectionsRecyclerView)
-        mainContainer.addView(closeButton)
         scrollView.addView(mainContainer)
 
         // Initial list render

@@ -133,6 +133,7 @@ Shared utilities live in `CommonLib/src/main/kotlin/com/lagradost/common/`:
 - `CustomPagesAdapter.kt` - RecyclerView adapter for custom pages list
 - `CustomPageItemTouchHelper.kt` - Drag-and-drop support for touch mode
 - `TvFocusUtils.kt` - Android TV detection and D-pad navigation helpers
+- `DialogUtils.kt` - Theme color resolution and TV/BottomSheet dialog factory
 
 **Using CommonLib in a plugin:**
 ```kotlin

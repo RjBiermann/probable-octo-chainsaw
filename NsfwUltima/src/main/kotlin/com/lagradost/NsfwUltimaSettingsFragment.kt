@@ -2,6 +2,7 @@ package com.lagradost
 
 import com.lagradost.common.TvFocusUtils
 
+import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
 import android.content.res.ColorStateList
@@ -10,6 +11,7 @@ import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -18,8 +20,6 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.widget.NestedScrollView
 import androidx.fragment.app.DialogFragment
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -33,9 +33,9 @@ import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
 
 /**
- * Settings fragment for NSFW Ultima with feed-centric design.
- * Displays feeds organized into collapsible groups with drag-and-drop reordering.
- * Supports both touch mode (drag handle) and TV mode (pick-and-tap reorder).
+ * Settings fragment for NSFW Ultima with homepage-centric design.
+ * Displays homepages directly with tap-to-edit functionality.
+ * Supports drag-and-drop reordering (touch) and tap-to-reorder (TV).
  */
 class NsfwUltimaSettingsFragment(
     private val plugin: NsfwUltimaPlugin
@@ -48,20 +48,16 @@ class NsfwUltimaSettingsFragment(
     private var feedList = mutableListOf<FeedItem>()
     private var settings = NsfwUltimaSettings()
     private var feedGroups = mutableListOf<FeedGroup>()
-    private var collapsedGroupIds = mutableSetOf<String>()
 
     private lateinit var mainContainer: LinearLayout
-    private lateinit var groupedFeedAdapter: GroupedFeedListAdapter
-    private lateinit var feedRecyclerView: RecyclerView
+    private lateinit var homepageAdapter: HomepageListAdapter
+    private lateinit var homepageRecyclerView: RecyclerView
     private lateinit var emptyStateText: TextView
-    private lateinit var reorderSubtitle: TextView
-    private var reorderModeButton: MaterialButton? = null  // TV mode reorder toggle
-    private var manageFeedsButton: MaterialButton? = null  // Store reference for focus restoration
+    private lateinit var homepageSubtitle: TextView
+    private var reorderModeButton: MaterialButton? = null
     private var itemTouchHelper: ItemTouchHelper? = null
-    private var groupingOptionsContainer: LinearLayout? = null  // For group management options
-    private var manageGroupsButton: MaterialButton? = null  // "Manage Groups" button
 
-    // Pick-and-tap reorder state (TV mode)
+    // Tap-to-reorder state (TV mode)
     private var isReorderMode = false
     private var selectedReorderPosition: Int = -1
 
@@ -152,20 +148,18 @@ class NsfwUltimaSettingsFragment(
     private fun loadData() {
         settings = NsfwUltimaStorage.loadSettings()
 
-        // Try to load feed list, or migrate from old format
+        // Load feeds (or migrate from old format)
         feedList = NsfwUltimaStorage.loadFeedList().toMutableList()
         if (feedList.isEmpty()) {
-            // Try migration from old plugin-centric format
             NsfwUltimaStorage.migrateFromPluginStates()?.let { migrated ->
                 feedList = migrated.toMutableList()
             }
         }
 
-        // Load grouping data
+        // Load homepages
         feedGroups = NsfwUltimaStorage.loadGroups().toMutableList()
-        collapsedGroupIds = NsfwUltimaStorage.loadCollapsedGroups().toMutableSet()
 
-        Log.d(TAG, "Loaded ${feedList.size} feeds, ${feedGroups.size} groups")
+        Log.d(TAG, "Loaded ${feedList.size} feeds, ${feedGroups.size} homepages")
     }
 
     private fun createSettingsView(context: Context): View {
@@ -196,8 +190,8 @@ class NsfwUltimaSettingsFragment(
         // Settings card
         mainContainer.addView(createSettingsCard(context))
 
-        // Your Feeds header row with reorder mode toggle
-        val feedsHeaderRow = LinearLayout(context).apply {
+        // Your Homepages header row with reorder mode toggle
+        val homepagesHeaderRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(
@@ -207,15 +201,15 @@ class NsfwUltimaSettingsFragment(
             setPadding(0, dp(context, 20), 0, dp(context, 8))
         }
 
-        feedsHeaderRow.addView(TextView(context).apply {
-            text = "Your Feeds"
+        homepagesHeaderRow.addView(TextView(context).apply {
+            text = "Your Homepages"
             textSize = 16f
             setTextColor(textColor)
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
 
-        // Reorder mode toggle button (TV mode only - touch mode uses drag handle)
+        // Reorder mode toggle button (TV mode only)
         if (isTvMode) {
             reorderModeButton = MaterialButton(
                 context,
@@ -236,37 +230,37 @@ class NsfwUltimaSettingsFragment(
                 setOnClickListener { toggleReorderMode(context) }
                 TvFocusUtils.makeFocusable(this)
             }
-            feedsHeaderRow.addView(reorderModeButton)
+            homepagesHeaderRow.addView(reorderModeButton)
         }
-        mainContainer.addView(feedsHeaderRow)
+        mainContainer.addView(homepagesHeaderRow)
 
-        // Subtitle - changes based on reorder mode
-        reorderSubtitle = TextView(context).apply {
-            text = getReorderSubtitleText()
+        // Subtitle
+        homepageSubtitle = TextView(context).apply {
+            text = getSubtitleText()
             textSize = 13f
             setTextColor(grayTextColor)
             setPadding(0, 0, 0, dp(context, 12))
         }
-        mainContainer.addView(reorderSubtitle)
+        mainContainer.addView(homepageSubtitle)
 
         // Empty state text
         emptyStateText = TextView(context).apply {
-            text = "No feeds added yet.\nTap 'Manage Feeds' to get started."
+            text = "No homepages yet.\nCreate one below to get started."
             textSize = 14f
             setTextColor(grayTextColor)
             gravity = Gravity.CENTER
             setPadding(dp(context, 16), dp(context, 24), dp(context, 16), dp(context, 24))
-            visibility = if (feedList.isEmpty()) View.VISIBLE else View.GONE
+            visibility = if (feedGroups.isEmpty()) View.VISIBLE else View.GONE
         }
         mainContainer.addView(emptyStateText)
 
-        // Feed list RecyclerView
-        feedRecyclerView = createFeedList(context)
-        mainContainer.addView(feedRecyclerView)
+        // Homepage list RecyclerView
+        homepageRecyclerView = createHomepageList(context)
+        mainContainer.addView(homepageRecyclerView)
 
-        // Add Feed button
-        manageFeedsButton = MaterialButton(context).apply {
-            text = "Manage Feeds"
+        // Create Homepage button
+        mainContainer.addView(MaterialButton(context).apply {
+            text = "Create New Homepage"
             textSize = 15f
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -275,10 +269,9 @@ class NsfwUltimaSettingsFragment(
                 topMargin = dp(context, 16)
             }
             backgroundTintList = ColorStateList.valueOf(primaryColor)
-            setOnClickListener { showAddFeedDialog() }
+            setOnClickListener { showHomepageEditor(null) }
             if (isTvMode) TvFocusUtils.makeFocusable(this)
-        }
-        mainContainer.addView(manageFeedsButton!!)
+        })
 
         // Reset All Data button
         mainContainer.addView(MaterialButton(
@@ -297,24 +290,6 @@ class NsfwUltimaSettingsFragment(
             strokeColor = ColorStateList.valueOf(grayTextColor)
             setTextColor(grayTextColor)
             setOnClickListener { showResetConfirmation(context) }
-            if (isTvMode) TvFocusUtils.makeFocusable(this)
-        })
-
-        // Close button
-        mainContainer.addView(MaterialButton(
-            context,
-            null,
-            com.google.android.material.R.attr.materialButtonOutlinedStyle
-        ).apply {
-            text = "Close"
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = dp(context, 12)
-            }
-            strokeColor = ColorStateList.valueOf(grayTextColor)
-            setOnClickListener { dismiss() }
             if (isTvMode) TvFocusUtils.makeFocusable(this)
         })
 
@@ -343,7 +318,7 @@ class NsfwUltimaSettingsFragment(
             setPadding(dp(context, 16), dp(context, 12), dp(context, 16), dp(context, 12))
         }
 
-        // Row 1: Show plugin names toggle
+        // Show plugin names toggle
         cardContent.addView(createToggleRow(
             context,
             title = "Show Plugin Names",
@@ -355,16 +330,8 @@ class NsfwUltimaSettingsFragment(
                 Log.e(TAG, "Failed to save settings")
                 showSaveErrorToast()
             }
-            refreshGroupedView()
-            plugin.nsfwUltima?.refreshPluginStates()
+            plugin.refreshAllHomepages()
         })
-
-        // Divider
-        cardContent.addView(createDivider(context))
-
-        // Row 2: Grouping options
-        groupingOptionsContainer = createGroupingOptionsContainer(context)
-        cardContent.addView(groupingOptionsContainer)
 
         card.addView(cardContent)
         return card
@@ -410,221 +377,7 @@ class NsfwUltimaSettingsFragment(
         return row
     }
 
-    private fun createDivider(context: Context): View {
-        return View(context).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(context, 1)
-            ).apply {
-                setMargins(0, dp(context, 12), 0, dp(context, 12))
-            }
-            setBackgroundColor((grayTextColor and 0x00FFFFFF) or 0x30000000)
-        }
-    }
-
-    private fun createGroupingOptionsContainer(context: Context): LinearLayout {
-        val container = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-
-        // Group status
-        val groupCount = feedGroups.size
-        val assignedCount = feedList.count { it.groupId != null }
-        val statusText = when {
-            groupCount == 0 -> "No groups defined yet"
-            assignedCount == 0 -> "$groupCount group(s), no feeds assigned"
-            else -> "$groupCount group(s), $assignedCount feeds assigned"
-        }
-
-        container.addView(TextView(context).apply {
-            text = statusText
-            textSize = 12f
-            setTextColor(grayTextColor)
-            setPadding(0, dp(context, 8), 0, dp(context, 8))
-        })
-
-        // Manage Groups button
-        manageGroupsButton = MaterialButton(
-            context,
-            null,
-            com.google.android.material.R.attr.materialButtonOutlinedStyle
-        ).apply {
-            text = "Manage Groups"
-            textSize = 13f
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            strokeColor = ColorStateList.valueOf(primaryColor)
-            setTextColor(primaryColor)
-            setOnClickListener { showGroupManagerDialog() }
-            if (isTvMode) TvFocusUtils.makeFocusable(this)
-        }
-        container.addView(manageGroupsButton)
-
-        return container
-    }
-
-    private fun rebuildGroupingOptions(context: Context) {
-        groupingOptionsContainer?.let { container ->
-            container.removeAllViews()
-
-            // Group status
-            val groupCount = feedGroups.size
-            val assignedCount = feedList.count { it.groupId != null }
-            val statusText = when {
-                groupCount == 0 -> "No groups defined yet"
-                assignedCount == 0 -> "$groupCount group(s), no feeds assigned"
-                else -> "$groupCount group(s), $assignedCount feeds assigned"
-            }
-
-            container.addView(TextView(context).apply {
-                text = statusText
-                textSize = 12f
-                setTextColor(grayTextColor)
-                setPadding(0, dp(context, 8), 0, dp(context, 8))
-            })
-
-            // Manage Groups button
-            manageGroupsButton = MaterialButton(
-                context,
-                null,
-                com.google.android.material.R.attr.materialButtonOutlinedStyle
-            ).apply {
-                text = "Manage Groups"
-                textSize = 13f
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-                strokeColor = ColorStateList.valueOf(primaryColor)
-                setTextColor(primaryColor)
-                setOnClickListener { showGroupManagerDialog() }
-                if (isTvMode) TvFocusUtils.makeFocusable(this)
-            }
-            container.addView(manageGroupsButton)
-        }
-    }
-
-    private fun showGroupManagerDialog() {
-        // Get available feeds from plugins
-        val availableFeeds = getAvailableFeeds()
-
-        val dialog = FeedGroupManagerDialog(
-            initialGroups = feedGroups,
-            allFeeds = feedList,
-            availableFeeds = availableFeeds,
-            showPluginNames = settings.showPluginNames,
-            onGroupsChanged = { updatedGroups ->
-                feedGroups.clear()
-                feedGroups.addAll(updatedGroups)
-                if (!NsfwUltimaStorage.saveGroups(feedGroups)) {
-                    Log.e(TAG, "Failed to save groups from group manager")
-                    showSaveErrorToast()
-                }
-                // Reorder feeds to match group order (grouped first, then ungrouped)
-                reorderFeedsByGroupOrder()
-                // Refresh the grouped view and options to reflect changes
-                refreshGroupedView()
-                context?.let { rebuildGroupingOptions(it) }
-            },
-            onFeedsUpdated = { updatedFeeds ->
-                feedList.clear()
-                feedList.addAll(updatedFeeds)
-                if (!NsfwUltimaStorage.saveFeedList(feedList)) {
-                    Log.e(TAG, "Failed to save feeds from group manager")
-                    showSaveErrorToast()
-                }
-                refreshGroupedView()
-                updateEmptyState()
-                updateFeedListHeader()
-                context?.let { rebuildGroupingOptions(it) }
-                plugin.nsfwUltima?.refreshFeedList()
-            }
-        )
-        dialog.show(parentFragmentManager, "FeedGroupManagerDialog")
-    }
-
-    private fun getAvailableFeeds(): List<AvailableFeed> {
-        val feeds = mutableListOf<AvailableFeed>()
-        val nsfwProviders = allProviders.filter { api ->
-            api.supportedTypes.contains(TvType.NSFW) && api.name != "NSFW Ultima"
-        }
-
-        nsfwProviders.forEach { api ->
-            try {
-                api.mainPage.forEach { mainPageData ->
-                    feeds.add(AvailableFeed(
-                        pluginName = api.name,
-                        sectionName = mainPageData.name,
-                        sectionData = mainPageData.data
-                    ))
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error getting feeds from ${api.name}", e)
-            }
-        }
-
-        // Deduplicate feeds by key (plugin + section + data)
-        return feeds.distinctBy { it.key() }
-    }
-
-    private fun updateFeedListHeader() {
-        reorderSubtitle.text = getReorderSubtitleText()
-    }
-
-    /**
-     * Reorder feedList so grouped feeds come first (in group order), then ungrouped feeds.
-     * This ensures the homepage displays feeds in the order users expect based on group arrangement.
-     */
-    private fun reorderFeedsByGroupOrder() {
-        val groupIds = feedGroups.map { it.id }.toSet()
-
-        // Collect feeds in group order, then add ungrouped at the end
-        val groupedFeeds = feedGroups.flatMap { group ->
-            feedList.filter { it.groupId == group.id }
-        }
-        val ungroupedFeeds = feedList.filter { it.groupId == null || it.groupId !in groupIds }
-
-        feedList.clear()
-        feedList.addAll(groupedFeeds + ungroupedFeeds)
-
-        if (!NsfwUltimaStorage.saveFeedList(feedList)) {
-            Log.e(TAG, "Failed to save reordered feed list")
-            showSaveErrorToast()
-        }
-        plugin.nsfwUltima?.refreshFeedList()
-    }
-
-    private fun refreshGroupedView() {
-        // Group feeds by their assigned groupId
-        val feedsByGroup = mutableMapOf<String, MutableList<FeedItem>>()
-        val ungrouped = mutableListOf<FeedItem>()
-
-        feedList.forEach { feed ->
-            val groupId = feed.groupId
-            if (groupId != null && feedGroups.any { it.id == groupId }) {
-                feedsByGroup.getOrPut(groupId) { mutableListOf() }.add(feed)
-            } else {
-                ungrouped.add(feed)
-            }
-        }
-
-        // Build result groups (only groups that have feeds)
-        val resultGroups = feedGroups.filter { feedsByGroup[it.id]?.isNotEmpty() == true }
-
-        val result = FeedGroupingEngine.GroupingResult(
-            groups = resultGroups,
-            feedsByGroup = feedsByGroup,
-            ungroupedFeeds = ungrouped
-        )
-        val items = FeedGroupingEngine.toAdapterItems(result, collapsedGroupIds)
-        if (::groupedFeedAdapter.isInitialized) {
-            groupedFeedAdapter.submitList(items)
-        }
-    }
-
-    private fun createFeedList(context: Context): RecyclerView {
+    private fun createHomepageList(context: Context): RecyclerView {
         val recyclerView = RecyclerView(context).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -632,301 +385,57 @@ class NsfwUltimaSettingsFragment(
             )
             layoutManager = LinearLayoutManager(context)
             isNestedScrollingEnabled = false
-            visibility = if (feedList.isEmpty()) View.GONE else View.VISIBLE
+            visibility = if (feedGroups.isEmpty()) View.GONE else View.VISIBLE
         }
 
-        // Create grouped adapter with reorder support
-        groupedFeedAdapter = GroupedFeedListAdapter(
+        homepageAdapter = HomepageListAdapter(
             context = context,
             isTvMode = isTvMode,
             textColor = textColor,
             grayTextColor = grayTextColor,
             primaryColor = primaryColor,
-            showPluginNames = settings.showPluginNames,
-            onGroupToggle = { groupId -> toggleGroupExpansion(groupId) },
-            onFeedRemove = { feedKey -> removeFeedByKey(feedKey) },
-            onFeedLongPress = { feedKey -> showMoveToGroupDialog(feedKey) },
+            cardColor = cardColor,
             onStartDrag = { viewHolder ->
                 itemTouchHelper?.startDrag(viewHolder)
             },
             onReorderTap = { position ->
-                onFeedTappedForReorder(position)
+                onHomepageTappedForReorder(position)
+            },
+            onHomepageClick = { homepage ->
+                if (!isReorderMode) {
+                    showHomepageEditor(homepage)
+                }
+            },
+            getFeedCount = { homepageId ->
+                FeedAssignmentService.getFeedsInHomepage(feedList, homepageId).size
             }
         )
-        recyclerView.adapter = groupedFeedAdapter
+        recyclerView.adapter = homepageAdapter
 
-        // Setup drag-and-drop for touch mode
+        // Setup drag-and-drop (touch mode)
         if (!isTvMode) {
-            val touchHelper = GroupedFeedItemTouchHelper(groupedFeedAdapter) {
-                // Sync internal feed list with adapter after drag
-                syncFeedListFromAdapter()
+            val touchHelper = HomepageItemTouchHelper(homepageAdapter) {
+                syncHomepagesFromAdapter()
             }
             itemTouchHelper = ItemTouchHelper(touchHelper)
             itemTouchHelper?.attachToRecyclerView(recyclerView)
         }
 
-        // Populate grouped data
-        refreshGroupedView()
+        homepageAdapter.submitList(feedGroups)
 
         return recyclerView
     }
 
-    /**
-     * Sync the internal feedList order from the adapter's current item order.
-     * Called after drag-and-drop reordering.
-     */
-    private fun syncFeedListFromAdapter() {
-        val newOrder = groupedFeedAdapter.getItems()
-            .filterIsInstance<GroupedFeedItem.Feed>()
-            .map { it.item }
-
-        Log.d(TAG, "syncFeedListFromAdapter: BEFORE=[${feedList.toPreviewString()}], AFTER=[${newOrder.toPreviewString()}]")
-
-        feedList.clear()
-        feedList.addAll(newOrder)
-        saveAndRefresh()
-    }
-
-    private fun toggleGroupExpansion(groupId: String) {
-        if (collapsedGroupIds.contains(groupId)) {
-            collapsedGroupIds.remove(groupId)
-        } else {
-            collapsedGroupIds.add(groupId)
-        }
-        if (!NsfwUltimaStorage.saveCollapsedGroups(collapsedGroupIds)) {
-            Log.e(TAG, "Failed to save collapsed groups state")
-            showSaveErrorToast()
-        }
-        refreshGroupedView()
-
-        // Restore focus for TV
-        if (isTvMode) {
-            TvFocusUtils.enableFocusLoop(mainContainer)
-        }
-    }
-
-    private fun removeFeedByKey(feedKey: String) {
-        val index = feedList.indexOfFirst { it.key() == feedKey }
-        if (index >= 0) {
-            feedList.removeAt(index)
-            saveAndRefresh()
-            updateEmptyState()
-            refreshGroupedView()
-
-            // Restore focus for TV
-            if (isTvMode) {
-                TvFocusUtils.enableFocusLoop(mainContainer)
-            }
-        } else {
-            Log.w(TAG, "removeFeedByKey: feed not found with key=$feedKey")
-        }
-    }
-
-    private fun showMoveToGroupDialog(feedKey: String) {
-        val feed = feedList.find { it.key() == feedKey }
-        if (feed == null) {
-            Log.w(TAG, "showMoveToGroupDialog: feed not found for key=$feedKey")
-            return
-        }
-
-        // If feed is in a group, show context menu with ungroup option
-        if (feed.groupId != null) {
-            showFeedContextMenu(feed)
-            return
-        }
-
-        // Feed is ungrouped - show move to group dialog
-        val dialog = MoveToGroupDialog(
-            feedItem = feed,
-            existingGroups = feedGroups,
-            currentGroupId = null,
-            onMoveToGroup = { movedFeed, targetGroupId ->
-                // Update feed with new groupId
-                val index = feedList.indexOfFirst { it.key() == movedFeed.key() }
-                if (index >= 0) {
-                    feedList[index] = movedFeed.copy(groupId = targetGroupId)
-                    saveAndRefresh()
-                    // Post to ensure UI updates after dialog callback completes
-                    feedRecyclerView.post {
-                        refreshGroupedView()
-                    }
-                } else {
-                    Log.e(TAG, "onMoveToGroup: feed not found - key=${movedFeed.key()}")
-                }
-            },
-            onCreateGroup = { groupName ->
-                val newGroup = FeedGroup.create(groupName)
-                feedGroups.add(newGroup)
-                if (!NsfwUltimaStorage.saveGroups(feedGroups)) {
-                    Log.e(TAG, "Failed to save new group")
-                    showSaveErrorToast()
-                }
-                newGroup
-            }
-        )
-        dialog.show(parentFragmentManager, "MoveToGroupDialog")
-    }
-
-    private fun showFeedContextMenu(feed: FeedItem) {
-        val context = requireContext()
-        val groupName = feedGroups.find { it.id == feed.groupId }?.name
-            ?: "Unknown Group"
-
-        val displayName = if (settings.showPluginNames) {
-            "[${feed.pluginName}] ${feed.sectionName}"
-        } else {
-            feed.sectionName
-        }
-
-        AlertDialog.Builder(context)
-            .setTitle(displayName)
-            .setMessage("Currently in: $groupName")
-            .setPositiveButton("Remove from Group") { _, _ ->
-                ungroupFeed(feed)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun ungroupFeed(feed: FeedItem) {
-        val updatedFeeds = FeedAssignmentService.ungroupFeed(feedList, feed)
-        feedList.clear()
-        feedList.addAll(updatedFeeds)
-        val saveSucceeded = NsfwUltimaStorage.saveFeedList(feedList)
-        refreshGroupedView()
-        updateFeedListHeader()
-        plugin.nsfwUltima?.refreshFeedList()
-
-        // Show appropriate toast based on save result
-        context?.let { ctx ->
-            val message = if (saveSucceeded) {
-                "Removed '${feed.sectionName}' from group"
-            } else {
-                Log.e(TAG, "Failed to save after ungrouping feed")
-                "Failed to save changes"
-            }
-            android.widget.Toast.makeText(ctx, message, android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun showAddFeedDialog() {
-        val availableFeeds = discoverAvailableFeeds()
-
-        val dialog = AddFeedDialog(
-            availableFeeds = availableFeeds,
-            onFeedSelected = { selectedFeed ->
-                // Add feed to list
-                val newFeed = selectedFeed.toFeedItem()
-                if (feedList.none { it.key() == newFeed.key() }) {
-                    feedList.add(newFeed)
-                    saveAndRefresh()
-                    updateEmptyState()
-                    refreshGroupedView()
-                    // Re-enable focus loop after list modification
-                    if (isTvMode) {
-                        TvFocusUtils.enableFocusLoop(mainContainer)
-                    }
-                }
-            },
-            onFeedRemoved = { removedFeed ->
-                // Remove feed from list
-                val key = removedFeed.key()
-                val index = feedList.indexOfFirst { it.key() == key }
-                if (index >= 0) {
-                    feedList.removeAt(index)
-                    saveAndRefresh()
-                    updateEmptyState()
-                    refreshGroupedView()
-                    // Re-enable focus loop after list modification
-                    if (isTvMode) {
-                        TvFocusUtils.enableFocusLoop(mainContainer)
-                    }
-                }
-            }
-        )
-        dialog.updateAddedFeeds(feedList)
-        // Restore focus to Manage Feeds button when dialog closes (TV mode)
-        if (isTvMode) {
-            dialog.lifecycle.addObserver(LifecycleEventObserver { _, event ->
-                if (event == Lifecycle.Event.ON_DESTROY) {
-                    if (isAdded && view != null) {
-                        manageFeedsButton?.post {
-                            if (isAdded && manageFeedsButton?.isAttachedToWindow == true) {
-                                manageFeedsButton?.requestFocus()
-                            }
-                        }
-                    }
-                }
-            })
-        }
-        dialog.show(parentFragmentManager, "AddFeedDialog")
-    }
-
-    private fun discoverAvailableFeeds(): List<AvailableFeed> {
-        val addedKeys = feedList.map { it.key() }.toSet()
-
-        return synchronized(allProviders) {
-            allProviders
-                .filter { isNsfwPlugin(it) && it.name != "NSFW Ultima" }
-                .flatMap { provider ->
-                    provider.mainPage.map { mainPageData ->
-                        AvailableFeed(
-                            pluginName = provider.name,
-                            sectionName = mainPageData.name,
-                            sectionData = mainPageData.data,
-                            isAdded = addedKeys.contains("${provider.name}::${mainPageData.name}::${mainPageData.data}")
-                        )
-                    }
-                }
-        }
-    }
-
-    private fun isNsfwPlugin(provider: MainAPI): Boolean {
-        if (provider.name in NsfwPluginConstants.KNOWN_NSFW_PLUGINS) return true
-        if (provider.supportedTypes.contains(TvType.NSFW)) return true
-        val nameLower = provider.name.lowercase()
-        return NsfwPluginConstants.NSFW_KEYWORDS.any { nameLower.contains(it) }
-    }
-
-    private fun updateEmptyState() {
-        val isEmpty = feedList.isEmpty()
-        emptyStateText.visibility = if (isEmpty) View.VISIBLE else View.GONE
-        feedRecyclerView.visibility = if (isEmpty) View.GONE else View.VISIBLE
-    }
-
-    private fun saveAndRefresh() {
-        val feedsSaved = NsfwUltimaStorage.saveFeedList(feedList)
-        val groupsSaved = NsfwUltimaStorage.saveGroups(feedGroups)
-        val collapsedSaved = NsfwUltimaStorage.saveCollapsedGroups(collapsedGroupIds)
-
-        if (!feedsSaved || !groupsSaved || !collapsedSaved) {
-            Log.e(TAG, "Failed to save: feeds=$feedsSaved, groups=$groupsSaved, collapsed=$collapsedSaved")
-            showSaveErrorToast()
-        }
-
-        plugin.nsfwUltima?.refreshFeedList()
-    }
-
-    private fun showSaveErrorToast() {
-        context?.let { ctx ->
-            android.widget.Toast.makeText(
-                ctx,
-                "Failed to save changes. Please try again.",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
-        }
-    }
-
-    private fun getReorderSubtitleText(): String {
+    private fun getSubtitleText(): String {
         return when {
             isReorderMode && selectedReorderPosition >= 0 ->
-                "Tap destination to move feed"
+                "Tap destination to move homepage"
             isReorderMode ->
-                "Tap a feed to select, then tap destination"
+                "Tap a homepage to select, then tap destination"
             isTvMode ->
-                "Drag ≡ to reorder, or tap Reorder button"
+                "Tap to edit, or use Reorder button"
             else ->
-                "Drag ≡ to reorder"
+                "Tap to edit. Drag ≡ to reorder. App restart required for changes."
         }
     }
 
@@ -949,75 +458,199 @@ class NsfwUltimaSettingsFragment(
             }
         }
 
-        reorderSubtitle.text = getReorderSubtitleText()
-        groupedFeedAdapter.setReorderMode(isReorderMode, -1)
+        homepageSubtitle.text = getSubtitleText()
+        homepageAdapter.setReorderMode(isReorderMode, -1)
     }
 
-    fun onFeedTappedForReorder(position: Int) {
+    private fun onHomepageTappedForReorder(position: Int) {
         if (!isReorderMode) return
 
-        // Only allow selecting/moving feed items, not headers
-        if (!groupedFeedAdapter.isFeedPosition(position)) return
-
         if (selectedReorderPosition < 0) {
-            // First tap - select the feed
             selectedReorderPosition = position
-            reorderSubtitle.text = getReorderSubtitleText()
-            groupedFeedAdapter.setReorderMode(true, position)
-            // Restore focus to the tapped item after adapter refresh
+            homepageSubtitle.text = getSubtitleText()
+            homepageAdapter.setReorderMode(true, position)
             restoreFocusToPosition(position)
         } else if (selectedReorderPosition == position) {
-            // Tapped same item - deselect
             selectedReorderPosition = -1
-            reorderSubtitle.text = getReorderSubtitleText()
-            groupedFeedAdapter.setReorderMode(true, -1)
-            // Restore focus to the tapped item after adapter refresh
+            homepageSubtitle.text = getSubtitleText()
+            homepageAdapter.setReorderMode(true, -1)
             restoreFocusToPosition(position)
         } else {
-            // Second tap - move the feed (only if target is also a feed)
-            if (!groupedFeedAdapter.isFeedPosition(position)) {
-                // Can't move to a header position
-                return
-            }
+            homepageAdapter.moveItem(selectedReorderPosition, position)
+            syncHomepagesFromAdapter()
 
-            groupedFeedAdapter.moveItem(selectedReorderPosition, position)
-            syncFeedListFromAdapter()
-
-            // Reset selection
             selectedReorderPosition = -1
-            reorderSubtitle.text = getReorderSubtitleText()
-            groupedFeedAdapter.setReorderMode(true, -1)
-            // Restore focus to the target position after move
+            homepageSubtitle.text = getSubtitleText()
+            homepageAdapter.setReorderMode(true, -1)
             restoreFocusToPosition(position)
         }
     }
 
     private fun restoreFocusToPosition(position: Int) {
-        feedRecyclerView.post {
-            val viewHolder = feedRecyclerView.findViewHolderForAdapterPosition(position)
+        homepageRecyclerView.post {
+            if (!isAdded || !homepageRecyclerView.isAttachedToWindow) return@post
+            val viewHolder = homepageRecyclerView.findViewHolderForAdapterPosition(position)
             viewHolder?.itemView?.requestFocus()
+        }
+    }
+
+    private fun syncHomepagesFromAdapter() {
+        feedGroups.clear()
+        feedGroups.addAll(homepageAdapter.getHomepages())
+        updatePriorities()
+        saveData()
+    }
+
+    private fun updatePriorities() {
+        feedGroups.forEachIndexed { index, group ->
+            feedGroups[index] = group.copy(priority = feedGroups.size - index)
+        }
+    }
+
+    private fun showHomepageEditor(existingHomepage: FeedGroup?) {
+        val availableFeeds = getAvailableFeeds()
+
+        val dialog = HomepageEditorDialog(
+            existingGroup = existingHomepage,
+            currentFeeds = feedList,
+            availableFeeds = availableFeeds,
+            showPluginNames = settings.showPluginNames,
+            onSave = { group, feedsInHomepage, allFeeds ->
+                val isNew = existingHomepage == null
+
+                // Update homepages
+                if (isNew) {
+                    feedGroups.add(0, group)
+                    updatePriorities()
+                } else {
+                    val index = feedGroups.indexOfFirst { it.id == group.id }
+                    if (index >= 0) {
+                        feedGroups[index] = group
+                    }
+                }
+
+                // Update feeds
+                feedList.clear()
+                feedList.addAll(allFeeds)
+
+                saveData()
+                refreshUI()
+
+                // Show restart reminder
+                context?.let { ctx ->
+                    android.widget.Toast.makeText(
+                        ctx,
+                        if (isNew) "Homepage created. Restart app to see it." else "Changes saved. Restart app to see updates.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            },
+            onDelete = if (existingHomepage != null) { { homepage ->
+                deleteHomepage(homepage)
+            } } else null
+        )
+        dialog.show(parentFragmentManager, "HomepageEditorDialog")
+    }
+
+    private fun deleteHomepage(homepage: FeedGroup) {
+        // Remove homepage
+        val index = feedGroups.indexOfFirst { it.id == homepage.id }
+        if (index >= 0) {
+            feedGroups.removeAt(index)
+            updatePriorities()
+        }
+
+        // Clear feed assignments for this homepage
+        feedList = FeedAssignmentService.clearHomepageAssignments(feedList, homepage.id).toMutableList()
+        // Remove orphaned feeds
+        feedList = feedList.filter { it.homepageIds.isNotEmpty() }.toMutableList()
+
+        saveData()
+        refreshUI()
+
+        context?.let { ctx ->
+            android.widget.Toast.makeText(
+                ctx,
+                "Homepage deleted. Restart app to see changes.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun getAvailableFeeds(): List<AvailableFeed> {
+        val feeds = mutableListOf<AvailableFeed>()
+        val nsfwProviders = allProviders.filter { api ->
+            api.supportedTypes.contains(TvType.NSFW) && !api.name.startsWith("NSFW Ultima")
+        }
+
+        nsfwProviders.forEach { api ->
+            try {
+                api.mainPage.forEach { mainPageData ->
+                    feeds.add(AvailableFeed(
+                        pluginName = api.name,
+                        sectionName = mainPageData.name,
+                        sectionData = mainPageData.data
+                    ))
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error getting feeds from ${api.name}", e)
+            }
+        }
+
+        return feeds.distinctBy { it.key() }
+    }
+
+    private fun refreshUI() {
+        homepageAdapter.submitList(feedGroups.toList())
+        updateEmptyState()
+        if (isTvMode) {
+            TvFocusUtils.enableFocusLoop(mainContainer)
+        }
+    }
+
+    private fun updateEmptyState() {
+        val isEmpty = feedGroups.isEmpty()
+        emptyStateText.visibility = if (isEmpty) View.VISIBLE else View.GONE
+        homepageRecyclerView.visibility = if (isEmpty) View.GONE else View.VISIBLE
+    }
+
+    private fun saveData() {
+        val feedsSaved = NsfwUltimaStorage.saveFeedList(feedList)
+        val groupsSaved = NsfwUltimaStorage.saveGroups(feedGroups)
+
+        if (!feedsSaved || !groupsSaved) {
+            Log.e(TAG, "Failed to save: feeds=$feedsSaved, groups=$groupsSaved")
+            showSaveErrorToast()
+        }
+
+        plugin.refreshAllHomepages()
+    }
+
+    private fun showSaveErrorToast() {
+        context?.let { ctx ->
+            android.widget.Toast.makeText(
+                ctx,
+                "Failed to save changes. Please try again.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
         }
     }
 
     private fun showResetConfirmation(context: Context) {
         AlertDialog.Builder(context)
             .setTitle("Reset All Data")
-            .setMessage("This will remove all your feeds, groups, and settings. Are you sure?")
+            .setMessage("This will remove all your homepages, feeds, and settings. Are you sure?")
             .setPositiveButton("Reset") { _, _ ->
                 val success = NsfwUltimaStorage.clearAll()
                 if (success) {
                     feedList.clear()
                     feedGroups.clear()
-                    collapsedGroupIds.clear()
                     settings = NsfwUltimaSettings()
 
-                    // Reset adapter
-                    if (::groupedFeedAdapter.isInitialized) {
-                        groupedFeedAdapter.submitList(emptyList())
-                    }
-
+                    homepageAdapter.submitList(emptyList())
                     updateEmptyState()
-                    plugin.nsfwUltima?.refreshFeedList()
+                    plugin.refreshAllHomepages()
+
                     Log.d(TAG, "All data reset")
                     android.widget.Toast.makeText(
                         context,
@@ -1039,4 +672,234 @@ class NsfwUltimaSettingsFragment(
 
     private fun dp(context: Context, dp: Int): Int =
         (dp * context.resources.displayMetrics.density).toInt()
+}
+
+/**
+ * Adapter for displaying homepages with drag-and-drop (touch) and tap-to-reorder (TV).
+ */
+class HomepageListAdapter(
+    private val context: Context,
+    private val isTvMode: Boolean,
+    private val textColor: Int,
+    private val grayTextColor: Int,
+    private val primaryColor: Int,
+    private val cardColor: Int,
+    private val onStartDrag: (viewHolder: RecyclerView.ViewHolder) -> Unit,
+    private val onReorderTap: (position: Int) -> Unit,
+    private val onHomepageClick: (FeedGroup) -> Unit,
+    private val getFeedCount: (homepageId: String) -> Int
+) : RecyclerView.Adapter<HomepageListAdapter.HomepageViewHolder>() {
+
+    private val homepages = mutableListOf<FeedGroup>()
+    private var reorderModeEnabled = false
+    private var selectedPosition = -1
+
+    fun setReorderMode(enabled: Boolean, selected: Int) {
+        reorderModeEnabled = enabled
+        selectedPosition = selected
+        notifyDataSetChanged()
+    }
+
+    @SuppressLint("NotifyDataSetChanged")
+    fun submitList(newHomepages: List<FeedGroup>) {
+        homepages.clear()
+        homepages.addAll(newHomepages)
+        notifyDataSetChanged()
+    }
+
+    override fun getItemCount(): Int = homepages.size
+
+    fun getHomepages(): List<FeedGroup> = homepages.toList()
+
+    fun moveItem(from: Int, to: Int) {
+        if (from < 0 || from >= homepages.size || to < 0 || to >= homepages.size) return
+        val item = homepages.removeAt(from)
+        homepages.add(to, item)
+        notifyItemMoved(from, to)
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): HomepageViewHolder {
+        return createViewHolder()
+    }
+
+    override fun onBindViewHolder(holder: HomepageViewHolder, position: Int) {
+        val homepage = homepages[position]
+        bindHomepage(holder, homepage, position)
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun createViewHolder(): HomepageViewHolder {
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dp(8)
+            }
+            setBackgroundColor(cardColor)
+            setPadding(dp(12), dp(14), dp(12), dp(14))
+        }
+
+        // Drag handle (touch mode only)
+        val dragHandle: TextView? = if (!isTvMode) {
+            TextView(context).apply {
+                text = "≡"
+                textSize = 20f
+                setTextColor(grayTextColor)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { marginEnd = dp(12) }
+            }.also { card.addView(it) }
+        } else null
+
+        // Content container
+        val contentContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val nameText = TextView(context).apply {
+            textSize = 16f
+            setTextColor(textColor)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        contentContainer.addView(nameText)
+
+        val countText = TextView(context).apply {
+            textSize = 12f
+            setTextColor(grayTextColor)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(2) }
+        }
+        contentContainer.addView(countText)
+
+        card.addView(contentContainer)
+
+        // Arrow indicator
+        val arrowText = TextView(context).apply {
+            text = "→"
+            textSize = 18f
+            setTextColor(grayTextColor)
+        }
+        card.addView(arrowText)
+
+        val holder = HomepageViewHolder(card, dragHandle, nameText, countText, arrowText)
+
+        // Setup drag handle touch listener
+        dragHandle?.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                onStartDrag(holder)
+            }
+            false
+        }
+
+        if (isTvMode) {
+            TvFocusUtils.makeFocusable(card)
+        }
+
+        return holder
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun bindHomepage(holder: HomepageViewHolder, homepage: FeedGroup, position: Int) {
+        val isSelected = reorderModeEnabled && position == selectedPosition
+        val feedCount = getFeedCount(homepage.id)
+
+        holder.itemView.tag = homepage.id
+        holder.nameText.text = homepage.name
+        holder.countText.text = "$feedCount feeds"
+        holder.countText.setTextColor(if (feedCount > 0) primaryColor else grayTextColor)
+
+        val card = holder.itemView as LinearLayout
+
+        if (reorderModeEnabled) {
+            if (isSelected) {
+                card.setBackgroundColor((primaryColor and 0x00FFFFFF) or 0x30000000)
+                holder.nameText.setTextColor(primaryColor)
+            } else {
+                card.setBackgroundColor(cardColor)
+                holder.nameText.setTextColor(textColor)
+            }
+
+            holder.arrowText.visibility = View.GONE
+            holder.dragHandle?.visibility = View.GONE
+
+            card.isClickable = true
+            card.isFocusable = true
+            if (isTvMode) TvFocusUtils.makeFocusable(card, 8)
+            card.setOnClickListener {
+                val pos = holder.bindingAdapterPosition
+                if (pos != RecyclerView.NO_POSITION) {
+                    onReorderTap(pos)
+                }
+            }
+        } else {
+            card.setBackgroundColor(cardColor)
+            holder.nameText.setTextColor(textColor)
+
+            holder.arrowText.visibility = View.VISIBLE
+            holder.dragHandle?.visibility = View.VISIBLE
+
+            card.isClickable = true
+            card.isFocusable = true
+            if (isTvMode) TvFocusUtils.makeFocusable(card)
+            card.setOnClickListener {
+                onHomepageClick(homepage)
+            }
+        }
+    }
+
+    private fun dp(dp: Int): Int = (dp * context.resources.displayMetrics.density).toInt()
+
+    class HomepageViewHolder(
+        itemView: View,
+        val dragHandle: TextView?,
+        val nameText: TextView,
+        val countText: TextView,
+        val arrowText: TextView
+    ) : RecyclerView.ViewHolder(itemView)
+}
+
+/**
+ * ItemTouchHelper callback for drag-and-drop reordering of homepages.
+ */
+class HomepageItemTouchHelper(
+    private val adapter: HomepageListAdapter,
+    private val onDragComplete: () -> Unit
+) : ItemTouchHelper.Callback() {
+
+    override fun isLongPressDragEnabled(): Boolean = false
+
+    override fun isItemViewSwipeEnabled(): Boolean = false
+
+    override fun getMovementFlags(
+        recyclerView: RecyclerView,
+        viewHolder: RecyclerView.ViewHolder
+    ): Int {
+        val dragFlags = ItemTouchHelper.UP or ItemTouchHelper.DOWN
+        return makeMovementFlags(dragFlags, 0)
+    }
+
+    override fun onMove(
+        recyclerView: RecyclerView,
+        viewHolder: RecyclerView.ViewHolder,
+        target: RecyclerView.ViewHolder
+    ): Boolean {
+        adapter.moveItem(viewHolder.bindingAdapterPosition, target.bindingAdapterPosition)
+        return true
+    }
+
+    override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+        // Not used
+    }
+
+    override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+        super.clearView(recyclerView, viewHolder)
+        onDragComplete()
+    }
 }

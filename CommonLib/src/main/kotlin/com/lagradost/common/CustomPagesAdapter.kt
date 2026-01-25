@@ -159,18 +159,22 @@ class CustomPagesAdapter(
             layoutParams = RecyclerView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            setPadding(dp(4), dp(4), dp(4), dp(4))
+            ).apply {
+                bottomMargin = dp(8)
+            }
+            setPadding(dp(12), dp(12), dp(12), dp(12))
         }
 
         // Drag handle (touch mode only)
         val dragHandle: TextView? = if (!isTvMode) {
             TextView(context).apply {
-                text = "\u2630" // Unicode hamburger menu
+                text = "≡"
                 textSize = 20f
                 setTextColor(grayTextColor)
-                setPadding(dp(4), dp(8), dp(12), dp(8))
-                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { marginEnd = dp(12) }
             }.also { row.addView(it) }
         } else null
 
@@ -179,7 +183,6 @@ class CustomPagesAdapter(
             setTextColor(textColor)
             textSize = 15f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            setPadding(if (isTvMode) dp(4) else 0, 0, 0, 0)
         }
         row.addView(label)
 
@@ -213,6 +216,9 @@ class CustomPagesAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val page = filteredItems[position]
         val isSelected = reorderModeEnabled && position == selectedPosition
+
+        // Tag for focus restoration after list mutations
+        holder.itemView.tag = page.path
 
         holder.label.text = page.label
 

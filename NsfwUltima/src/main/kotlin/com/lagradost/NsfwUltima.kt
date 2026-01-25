@@ -8,8 +8,22 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
-class NsfwUltima(val plugin: NsfwUltimaPlugin) : MainAPI() {
-    override var name = "NSFW Ultima"
+/**
+ * NsfwUltima MainAPI provider.
+ *
+ * Each instance represents a single homepage. The homepage parameter determines
+ * which feeds are shown - only feeds assigned to this homepage's groupId are displayed.
+ *
+ * @param plugin The plugin instance
+ * @param homepage The homepage/group this provider represents (null for setup/empty state)
+ */
+class NsfwUltima(
+    val plugin: NsfwUltimaPlugin,
+    private val homepage: FeedGroup? = null
+) : MainAPI() {
+
+    // Name is derived from homepage, or "NSFW Ultima" for setup state
+    override var name = homepage?.let { "NSFW Ultima - ${it.name}" } ?: "NSFW Ultima"
     override var mainUrl = "https://nsfwultima.local"
     override var supportedTypes = setOf(TvType.NSFW)
     override var lang = "en"
@@ -20,41 +34,64 @@ class NsfwUltima(val plugin: NsfwUltimaPlugin) : MainAPI() {
         private const val TAG = "NsfwUltima"
     }
 
-    // Cached data - now feed-centric
+    // Cached data
     private var cachedFeedList: List<FeedItem> = emptyList()
     private var cachedSettings: NsfwUltimaSettings = NsfwUltimaSettings()
     private var initialized = false
 
+    /** The group ID this provider filters by (null means setup/empty state) */
+    val homepageId: String? get() = homepage?.id
+
     /**
      * Initialize by loading feed list and settings.
+     * Only feeds assigned to this homepage's groupId are cached.
      */
     fun initialize() {
         if (initialized) {
-            Log.d(TAG, "initialize() skipped - already initialized")
+            Log.d(TAG, "initialize() skipped - already initialized for homepage: ${homepage?.name ?: "setup"}")
             return
         }
 
         cachedSettings = NsfwUltimaStorage.loadSettings()
-        cachedFeedList = NsfwUltimaStorage.loadFeedList()
+
+        // Load all feeds, then filter to this homepage's group
+        val allFeeds = NsfwUltimaStorage.loadFeedList()
 
         // Try migration from old format if feed list is empty
-        if (cachedFeedList.isEmpty()) {
-            NsfwUltimaStorage.migrateFromPluginStates()?.let { migrated ->
-                cachedFeedList = migrated
-            }
+        val feedsToFilter = if (allFeeds.isEmpty()) {
+            NsfwUltimaStorage.migrateFromPluginStates() ?: emptyList()
+        } else {
+            allFeeds
+        }
+
+        // Filter feeds to only those assigned to this homepage
+        cachedFeedList = if (homepage != null) {
+            feedsToFilter.filter { it.isInHomepage(homepage.id) }
+        } else {
+            // Setup state - no feeds (show configuration message)
+            emptyList()
         }
 
         initialized = true
-        Log.d(TAG, "Initialized with ${cachedFeedList.size} feeds. First 3: [${cachedFeedList.toPreviewString()}]")
+        Log.d(TAG, "Initialized homepage '${homepage?.name ?: "setup"}' with ${cachedFeedList.size} feeds. First 3: [${cachedFeedList.toPreviewString()}]")
     }
 
     /**
      * Refresh feed list (called from settings when user makes changes).
+     * Reloads and filters feeds for this homepage.
      */
     fun refreshFeedList() {
         cachedSettings = NsfwUltimaStorage.loadSettings()
-        cachedFeedList = NsfwUltimaStorage.loadFeedList()
-        Log.d(TAG, "Refreshed feed list: ${cachedFeedList.size} feeds. First 3: [${cachedFeedList.toPreviewString()}]")
+
+        // Load all feeds, then filter to this homepage's group
+        val allFeeds = NsfwUltimaStorage.loadFeedList()
+        cachedFeedList = if (homepage != null) {
+            allFeeds.filter { it.isInHomepage(homepage.id) }
+        } else {
+            emptyList()
+        }
+
+        Log.d(TAG, "Refreshed homepage '${homepage?.name ?: "setup"}': ${cachedFeedList.size} feeds. First 3: [${cachedFeedList.toPreviewString()}]")
     }
 
     /**
@@ -97,23 +134,33 @@ class NsfwUltima(val plugin: NsfwUltimaPlugin) : MainAPI() {
 
     /**
      * Build mainPage from the user's feed list.
-     * Order is preserved exactly as user arranged it.
+     * Only shows feeds assigned to this homepage's group.
      */
     override val mainPage: List<MainPageData>
         get() {
             if (!initialized) initialize()
 
-            if (cachedFeedList.isEmpty()) {
-                // Return a placeholder section that shows setup instructions
+            // Setup state (no homepage) - show configuration message
+            if (homepage == null) {
                 return listOf(
                     MainPageData(
-                        name = "Configure NSFW Ultima",
+                        name = "Create a Homepage in Settings",
                         data = "__CONFIGURE__"
                     )
                 )
             }
 
-            Log.d(TAG, "mainPage getter called. First 3 feeds: [${cachedFeedList.toPreviewString()}]")
+            // Homepage exists but has no feeds assigned
+            if (cachedFeedList.isEmpty()) {
+                return listOf(
+                    MainPageData(
+                        name = "Add feeds to '${homepage.name}' in Settings",
+                        data = "__CONFIGURE__"
+                    )
+                )
+            }
+
+            Log.d(TAG, "mainPage for '${homepage.name}': ${cachedFeedList.size} feeds. First 3: [${cachedFeedList.toPreviewString()}]")
 
             return cachedFeedList.map { feed ->
                 val displayName = if (cachedSettings.showPluginNames) {
@@ -192,7 +239,12 @@ class NsfwUltima(val plugin: NsfwUltimaPlugin) : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         if (!initialized) initialize()
 
-        // Get unique plugin names from the feed list
+        // Setup state - no search
+        if (homepage == null) {
+            return emptyList()
+        }
+
+        // Get unique plugin names from this homepage's feed list
         val enabledPluginNames = cachedFeedList.map { it.pluginName }.toSet()
 
         // Copy provider list to avoid holding lock during network calls
@@ -245,7 +297,12 @@ class NsfwUltima(val plugin: NsfwUltimaPlugin) : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         if (!initialized) initialize()
 
-        // Get unique plugin names from the feed list
+        // Setup state - can't load
+        if (homepage == null) {
+            throw ErrorLoadingException("Please create a homepage in settings first")
+        }
+
+        // Get unique plugin names from this homepage's feed list
         val enabledPluginNames = cachedFeedList.map { it.pluginName }.toSet()
 
         // Copy provider list to avoid holding lock during network calls
@@ -298,7 +355,12 @@ class NsfwUltima(val plugin: NsfwUltimaPlugin) : MainAPI() {
     ): Boolean {
         if (!initialized) initialize()
 
-        // Get unique plugin names from the feed list
+        // Setup state - can't load links
+        if (homepage == null) {
+            return false
+        }
+
+        // Get unique plugin names from this homepage's feed list
         val enabledPluginNames = cachedFeedList.map { it.pluginName }.toSet()
 
         // Copy provider list to avoid holding lock during network calls

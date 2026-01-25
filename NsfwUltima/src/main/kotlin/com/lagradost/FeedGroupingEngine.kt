@@ -39,14 +39,17 @@ object FeedGroupingEngine {
         val feedsByGroup = mutableMapOf<String, MutableList<FeedItem>>()
         val resultGroups = mutableListOf<FeedGroup>()
 
-        // Step 1: Assign feeds with explicit groupId to custom groups
+        // Step 1: Assign feeds with explicit homepage assignments to custom groups
         val customGroupMap = customGroups.associateBy { it.id }
         val assignedKeys = mutableSetOf<String>()
 
         feeds.forEach { feed ->
-            if (feed.groupId != null && customGroupMap.containsKey(feed.groupId)) {
-                feedsByGroup.getOrPut(feed.groupId) { mutableListOf() }.add(feed)
-                assignedKeys.add(feed.key())
+            // Add feed to each homepage it's assigned to
+            feed.homepageIds.forEach { homepageId ->
+                if (customGroupMap.containsKey(homepageId)) {
+                    feedsByGroup.getOrPut(homepageId) { mutableListOf() }.add(feed)
+                    assignedKeys.add(feed.key())
+                }
             }
         }
 
@@ -189,7 +192,7 @@ object FeedGroupingEngine {
                 groupFeeds.forEach { feed ->
                     items.add(GroupedFeedItem.Feed(
                         item = feed,
-                        groupId = group.id
+                        homepageIds = feed.homepageIds
                     ))
                 }
             }
@@ -199,7 +202,7 @@ object FeedGroupingEngine {
         result.ungroupedFeeds.forEach { feed ->
             items.add(GroupedFeedItem.Feed(
                 item = feed,
-                groupId = null
+                homepageIds = feed.homepageIds
             ))
         }
 
@@ -207,14 +210,36 @@ object FeedGroupingEngine {
     }
 
     /**
-     * Move a feed to a different group by updating its groupId.
+     * Add a feed to a homepage by adding the homepage ID to its set.
      *
-     * @param feed The feed to move
-     * @param targetGroupId The target group ID (null to ungroup)
-     * @return Updated feed with new groupId
+     * @param feed The feed to update
+     * @param homepageId The homepage ID to add
+     * @return Updated feed with new homepage assignment
      */
-    fun moveFeedToGroup(feed: FeedItem, targetGroupId: String?): FeedItem {
-        return feed.copy(groupId = targetGroupId)
+    fun addFeedToHomepage(feed: FeedItem, homepageId: String): FeedItem {
+        return feed.copy(homepageIds = feed.homepageIds + homepageId)
+    }
+
+    /**
+     * Remove a feed from a homepage by removing the homepage ID from its set.
+     *
+     * @param feed The feed to update
+     * @param homepageId The homepage ID to remove
+     * @return Updated feed without that homepage assignment
+     */
+    fun removeFeedFromHomepage(feed: FeedItem, homepageId: String): FeedItem {
+        return feed.copy(homepageIds = feed.homepageIds - homepageId)
+    }
+
+    /**
+     * Set the exact homepage assignments for a feed.
+     *
+     * @param feed The feed to update
+     * @param homepageIds The new set of homepage IDs
+     * @return Updated feed with exact homepage assignments
+     */
+    fun setFeedHomepages(feed: FeedItem, homepageIds: Set<String>): FeedItem {
+        return feed.copy(homepageIds = homepageIds)
     }
 
     /**

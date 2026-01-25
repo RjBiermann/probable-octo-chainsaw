@@ -151,30 +151,55 @@ data class AggregatedSectionData(
 /**
  * A single feed item in the user's ordered feed list.
  * This is the new feed-centric data model.
+ *
+ * A feed can be assigned to multiple homepages via homepageIds.
  */
 data class FeedItem(
     val pluginName: String,
     val sectionName: String,
     val sectionData: String,
-    val groupId: String? = null  // Optional group assignment for manual categorization
+    val homepageIds: Set<String> = emptySet()  // Homepages this feed is assigned to
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("pluginName", pluginName)
         put("sectionName", sectionName)
         put("sectionData", sectionData)
-        if (groupId != null) put("groupId", groupId)
+        if (homepageIds.isNotEmpty()) {
+            put("homepageIds", JSONArray().apply {
+                homepageIds.forEach { put(it) }
+            })
+        }
     }
 
     /** Create unique key for comparison */
     fun key(): String = "$pluginName::$sectionName::$sectionData"
 
+    /** Check if this feed is assigned to a specific homepage */
+    fun isInHomepage(homepageId: String): Boolean = homepageId in homepageIds
+
     companion object {
         fun fromJson(json: JSONObject): FeedItem? = try {
+            // Parse homepageIds - supports both new array format and old single groupId
+            val homepageIds = when {
+                json.has("homepageIds") -> {
+                    val arr = json.getJSONArray("homepageIds")
+                    (0 until arr.length()).mapNotNull { i ->
+                        arr.optString(i).ifBlank { null }
+                    }.toSet()
+                }
+                // Migration: convert old groupId to homepageIds
+                json.has("groupId") -> {
+                    val oldGroupId = json.optString("groupId").ifBlank { null }
+                    if (oldGroupId != null) setOf(oldGroupId) else emptySet()
+                }
+                else -> emptySet()
+            }
+
             FeedItem(
                 pluginName = json.getString("pluginName"),
                 sectionName = json.getString("sectionName"),
                 sectionData = json.getString("sectionData"),
-                groupId = json.optString("groupId").ifBlank { null }
+                homepageIds = homepageIds
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse FeedItem from JSON: ${e.message}")
@@ -233,7 +258,7 @@ sealed class GroupedFeedItem {
 
     data class Feed(
         val item: FeedItem,
-        val groupId: String?
+        val homepageIds: Set<String>
     ) : GroupedFeedItem()
 }
 
