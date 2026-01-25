@@ -8,6 +8,10 @@ Cloudstream3 plugin repository containing NSFW video streaming plugins. Each top
 
 Current plugins: Fullporner, HQPorner, MissAV, Neporn, NsfwUltima, Perverzija, PornHits, PornTrex, PornXp
 
+**License:** Public domain - use however you want with no conditions.
+
+**Attribution:** Plugin system based on [Aliucord](https://github.com/Aliucord).
+
 ## AI Policy
 
 When using AI assistance for contributions to this repository:
@@ -96,6 +100,8 @@ All settings UIs are built programmatically (no XML) using Material components:
 
 **Dialog callbacks:** When dialogs modify data and call parent callbacks (e.g., `onGroupsChanged`), the parent must call UI refresh methods (e.g., `refreshGroupedView()`) to update the display. Changes won't reflect automatically.
 
+**Async callback lifecycle safety:** Callbacks from AlertDialogs, confirmation dialogs, or any async operations must check `if (!isAdded) return@callback` at the start. The fragment may detach while the dialog is open.
+
 ### TV Mode Support
 
 Each plugin detects TV mode via `TvFocusUtils.isTvMode()` and adapts:
@@ -108,6 +114,13 @@ Each plugin detects TV mode via `TvFocusUtils.isTvMode()` and adapts:
 1. Tag views with identifiers: `card.tag = itemKey`
 2. After rebuild, find and restore: `container.post { findViewWithTag(key)?.requestFocus() }`
 3. Always guard with lifecycle checks: `if (isAdded && view.isAttachedToWindow)`
+
+**Focus debugging:** Always check `requestFocus()` return value and log failures. Android's focus can fail silently for many reasons (view detached, not focusable, another view has focus lock). Pattern:
+```kotlin
+if (!view.requestFocus()) {
+    Log.d(TAG, "Focus failed for view at position $position")
+}
+```
 
 **Adapter tagging:** In RecyclerView adapters, add `holder.itemView.tag = item.key()` in bind methods (`bindFeed`, `bindGroup`) so parent dialogs can locate items by key after `submitList()` or `notifyDataSetChanged()`.
 
@@ -133,7 +146,11 @@ Shared utilities live in `CommonLib/src/main/kotlin/com/lagradost/common/`:
 - `CustomPagesAdapter.kt` - RecyclerView adapter for custom pages list
 - `CustomPageItemTouchHelper.kt` - Drag-and-drop support for touch mode
 - `TvFocusUtils.kt` - Android TV detection and D-pad navigation helpers
-- `DialogUtils.kt` - Theme color resolution and TV/BottomSheet dialog factory
+- `DialogUtils.kt` - Theme color resolution, TV/BottomSheet dialog factory, and `showDeleteConfirmation()` for delete actions
+
+**Kotlin smart-casts constructor vals:** Constructor `val` parameters (e.g., `val existingGroup: HomepageGroup?`) are smart-cast in lambdas because they can't change. Don't use elvis (`?:`) or non-null assertion (`!!`) on them after null checks - Kotlin handles this automatically.
+
+**RecyclerView focus loop boundaries:** In `enableFocusLoopWithRecyclerView`, the boundary conditions (`if (firstAfterRv != null)`, `if (lastBeforeRv != null)`) are intentional. They only set up page boundary loops when elements exist on that side of the RecyclerView - otherwise, Android's default focus behavior correctly enters the RV from the adjacent element.
 
 **Using CommonLib in a plugin:**
 ```kotlin

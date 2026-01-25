@@ -137,4 +137,27 @@ object DialogUtils {
             }
         }
     }
+
+    /**
+     * Show a confirmation dialog before deleting an item.
+     *
+     * @param context The context
+     * @param itemName The name of the item being deleted (shown in the message)
+     * @param itemType The type of item (e.g., "page", "feed") - used in title
+     * @param onConfirm Callback executed when user confirms deletion
+     */
+    fun showDeleteConfirmation(
+        context: Context,
+        itemName: String,
+        itemType: String = "item",
+        onConfirm: () -> Unit
+    ) {
+        val title = "Delete ${itemType.replaceFirstChar { it.uppercase() }}"
+        AlertDialog.Builder(context)
+            .setTitle(title)
+            .setMessage("Are you sure you want to delete \"$itemName\"?")
+            .setPositiveButton("Delete") { _, _ -> onConfirm() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
 }

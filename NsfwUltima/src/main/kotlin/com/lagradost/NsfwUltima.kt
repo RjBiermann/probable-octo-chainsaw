@@ -95,13 +95,6 @@ class NsfwUltima(
     }
 
     /**
-     * Legacy method for compatibility - redirects to refreshFeedList.
-     */
-    fun refreshPluginStates() {
-        refreshFeedList()
-    }
-
-    /**
      * Check if a plugin is NSFW based on name and type.
      */
     private fun isNsfwPlugin(provider: MainAPI): Boolean {

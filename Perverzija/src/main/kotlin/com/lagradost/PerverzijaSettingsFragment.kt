@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
 import com.lagradost.common.CustomPage
 import com.lagradost.common.CustomPageItemTouchHelper
 import com.lagradost.common.CustomPagesAdapter
+import com.lagradost.common.DialogUtils
 import com.lagradost.common.TvFocusUtils
 import com.lagradost.common.ValidationResult
 import android.app.Dialog
@@ -388,30 +389,38 @@ class PerverzijaSettingsFragment : DialogFragment() {
             onRemove = { position ->
                 val sourceIndex = adapter.getSourceIndex(position)
                 if (sourceIndex >= 0) {
-                    val removed = currentPages.removeAt(sourceIndex)
-                    if (!saveCustomPages(context, currentPages)) {
-                        currentPages.add(sourceIndex, removed)
-                        Toast.makeText(context, "Failed to save changes", Toast.LENGTH_SHORT).show()
-                        return@CustomPagesAdapter
-                    }
-                    adapter.submitList(currentPages)
-                    updateEmptyState()
-                    // Reset reorder mode when list changes
-                    if (isTvMode && isReorderMode) {
-                        isReorderMode = false
-                        selectedReorderPosition = -1
-                        adapter.setReorderMode(false, -1)
-                        reorderModeButton?.apply {
-                            text = "Reorder"
-                            backgroundTintList = ColorStateList.valueOf(0)
-                            setTextColor(primaryColor)
-                            strokeColor = ColorStateList.valueOf(primaryColor)
-                            strokeWidth = dp(context, 1)
+                    val pageToDelete = currentPages[sourceIndex]
+                    DialogUtils.showDeleteConfirmation(
+                        context = context,
+                        itemName = pageToDelete.label,
+                        itemType = "page"
+                    ) {
+                        if (!isAdded) return@showDeleteConfirmation
+                        val removed = currentPages.removeAt(sourceIndex)
+                        if (!saveCustomPages(context, currentPages)) {
+                            currentPages.add(sourceIndex, removed)
+                            Toast.makeText(context, "Failed to save changes", Toast.LENGTH_SHORT).show()
+                            return@showDeleteConfirmation
                         }
-                        reorderSubtitle?.text = getReorderSubtitleText()
-                    }
-                    if (isTvMode) {
-                        TvFocusUtils.enableFocusLoop(mainContainer)
+                        adapter.submitList(currentPages)
+                        updateEmptyState()
+                        // Reset reorder mode when list changes
+                        if (isTvMode && isReorderMode) {
+                            isReorderMode = false
+                            selectedReorderPosition = -1
+                            adapter.setReorderMode(false, -1)
+                            reorderModeButton?.apply {
+                                text = "Reorder"
+                                backgroundTintList = ColorStateList.valueOf(0)
+                                setTextColor(primaryColor)
+                                strokeColor = ColorStateList.valueOf(primaryColor)
+                                strokeWidth = dp(context, 1)
+                            }
+                            reorderSubtitle?.text = getReorderSubtitleText()
+                        }
+                        if (isTvMode) {
+                            TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
+                        }
                     }
                 }
             },
@@ -521,7 +530,7 @@ class PerverzijaSettingsFragment : DialogFragment() {
                     updateEmptyState()
                     // Re-enable focus loop after list changes on TV
                     if (isTvMode) {
-                        TvFocusUtils.enableFocusLoop(mainContainer)
+                        TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
                     }
                 } else {
                     statusText.text = "This section already exists"
@@ -547,7 +556,7 @@ class PerverzijaSettingsFragment : DialogFragment() {
 
         // Enable focus loop on TV (wraps from last to first focusable element)
         if (isTvMode) {
-            TvFocusUtils.enableFocusLoop(mainContainer)
+            TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
         }
 
         return scrollView
@@ -657,7 +666,7 @@ class PerverzijaSettingsFragment : DialogFragment() {
             restoreFocusToPosition(position)
 
             if (isTvMode) {
-                TvFocusUtils.enableFocusLoop(mainContainer)
+                TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
             }
         }
     }

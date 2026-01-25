@@ -28,8 +28,8 @@ class NsfwUltimaPlugin : Plugin() {
     override fun load(context: Context) {
         activity = context as? AppCompatActivity
 
-        // Load homepages (FeedGroups) from storage
-        val homepages = NsfwUltimaStorage.loadGroups()
+        // Load homepages (FeedGroups) from storage, sorted alphabetically
+        val homepages = NsfwUltimaStorage.loadGroups().sortedBy { it.name.lowercase() }
 
         if (homepages.isEmpty()) {
             // No homepages defined - register a setup provider

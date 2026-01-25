@@ -160,13 +160,52 @@ class HomepageEditorDialog(
 
         mainContainer.addView(nameLayout)
 
+        // Delete button (only for existing homepages)
+        if (existingGroup != null && onDelete != null) {
+            val deleteButton = MaterialButton(
+                context,
+                null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle
+            ).apply {
+                text = "Delete Homepage"
+                textSize = 14f
+                minimumWidth = 0
+                minimumHeight = 0
+                minWidth = 0
+                minHeight = dp(40)
+                insetTop = 0
+                insetBottom = 0
+                setPadding(dp(16), 0, dp(16), 0)
+                val warningColor = 0xFFE53935.toInt()
+                strokeColor = ColorStateList.valueOf(warningColor)
+                setTextColor(warningColor)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dp(8) }
+                setOnClickListener {
+                    DialogUtils.showDeleteConfirmation(
+                        context = context,
+                        itemName = existingGroup.name,
+                        itemType = "homepage"
+                    ) {
+                        if (!isAdded) return@showDeleteConfirmation
+                        onDelete(existingGroup)
+                        dismiss()
+                    }
+                }
+                if (isTvMode) TvFocusUtils.makeFocusable(this)
+            }
+            mainContainer.addView(deleteButton)
+        }
+
         // Feed management section (shown for both new and existing homepages)
         addFeedManagementSection(context)
 
         scrollView.addView(mainContainer)
 
         if (isTvMode) {
-            TvFocusUtils.enableFocusLoop(mainContainer)
+            TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, feedsRecyclerView)
         }
 
         return scrollView
@@ -318,8 +357,15 @@ class HomepageEditorDialog(
                 onFeedTappedForReorder(position)
             },
             onRemove = { feed ->
-                removeFeed(feed)
-                context.let { rebuildAvailableFeeds(it) }
+                DialogUtils.showDeleteConfirmation(
+                    context = context,
+                    itemName = feed.sectionName,
+                    itemType = "feed"
+                ) {
+                    if (!isAdded) return@showDeleteConfirmation
+                    removeFeed(feed)
+                    context.let { rebuildAvailableFeeds(it) }
+                }
             }
         )
 
@@ -424,7 +470,7 @@ class HomepageEditorDialog(
         }
 
         if (isTvMode) {
-            TvFocusUtils.enableFocusLoop(mainContainer)
+            TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, feedsRecyclerView)
 
             // Restore focus to next chip (or first available if specified key not found)
             if (restoreFocusToKey != null) {
@@ -539,6 +585,11 @@ class HomepageEditorDialog(
 
         // Update reorder button visibility (only useful with 2+ feeds)
         reorderButton?.visibility = if (homepageFeeds.size > 1) View.VISIBLE else View.GONE
+
+        // Re-enable focus loop after list mutation (TV mode)
+        if (isTvMode) {
+            TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, feedsRecyclerView)
+        }
     }
 
     private fun toggleReorderMode(context: Context) {
@@ -586,7 +637,7 @@ class HomepageEditorDialog(
             // Move the feed
             val item = homepageFeeds.removeAt(selectedReorderPosition)
             homepageFeeds.add(position, item)
-            feedsAdapter.submitList(homepageFeeds.toList())
+            updateFeedsUI()
 
             selectedReorderPosition = -1
             reorderSubtitle?.text = "Tap a feed to select, then tap destination"

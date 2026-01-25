@@ -18,7 +18,6 @@ object NsfwUltimaStorage {
     private const val KEY_FEED_LIST = "NSFWULTIMA_FEED_LIST"
     private const val KEY_SETTINGS = "NSFWULTIMA_SETTINGS"
     private const val KEY_GROUPS = "NSFWULTIMA_GROUPS"
-    private const val KEY_COLLAPSED_GROUPS = "NSFWULTIMA_COLLAPSED_GROUPS"
     // Legacy keys for migration from PageManager
     private const val LEGACY_KEY_FEED_LIST = "PAGEMANAGER_FEED_LIST"
     private const val LEGACY_KEY_SETTINGS = "PAGEMANAGER_SETTINGS"
@@ -64,7 +63,7 @@ object NsfwUltimaStorage {
         }
     }
 
-    // Keep legacy methods for backward compatibility during migration
+    // Keep legacy load method for backward compatibility during migration
     fun loadPluginStates(): List<PluginState> {
         return try {
             val json = getKey<String>(LEGACY_KEY_PLUGIN_STATES) ?: return emptyList()
@@ -75,19 +74,6 @@ object NsfwUltimaStorage {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load plugin states", e)
             emptyList()
-        }
-    }
-
-    fun savePluginStates(states: List<PluginState>): Boolean {
-        return try {
-            val array = JSONArray().apply {
-                states.forEach { put(it.toJson()) }
-            }
-            setKey(LEGACY_KEY_PLUGIN_STATES, array.toString())
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save plugin states", e)
-            false
         }
     }
 
@@ -192,36 +178,6 @@ object NsfwUltimaStorage {
     }
 
     /**
-     * Load collapsed group IDs.
-     */
-    fun loadCollapsedGroups(): Set<String> {
-        return try {
-            val json = getKey<String>(KEY_COLLAPSED_GROUPS) ?: return emptySet()
-            val array = JSONArray(json)
-            (0 until array.length()).map { i -> array.getString(i) }.toSet()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to load collapsed groups", e)
-            emptySet()
-        }
-    }
-
-    /**
-     * Save collapsed group IDs.
-     */
-    fun saveCollapsedGroups(groupIds: Set<String>): Boolean {
-        return try {
-            val array = JSONArray().apply {
-                groupIds.forEach { put(it) }
-            }
-            setKey(KEY_COLLAPSED_GROUPS, array.toString())
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save collapsed groups", e)
-            false
-        }
-    }
-
-    /**
      * Clear all stored data.
      * @return true if all keys were cleared successfully, false if any operation failed
      */
@@ -230,7 +186,6 @@ object NsfwUltimaStorage {
             setKey(KEY_FEED_LIST, null)
             setKey(KEY_SETTINGS, null)
             setKey(KEY_GROUPS, null)
-            setKey(KEY_COLLAPSED_GROUPS, null)
             // Also clear legacy keys
             setKey(LEGACY_KEY_FEED_LIST, null)
             setKey(LEGACY_KEY_PLUGIN_STATES, null)

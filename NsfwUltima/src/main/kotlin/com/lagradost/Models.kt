@@ -247,22 +247,6 @@ data class FeedGroup(
 }
 
 /**
- * Sealed class for adapter items in grouped view.
- */
-sealed class GroupedFeedItem {
-    data class Header(
-        val group: FeedGroup,
-        val feedCount: Int,
-        val isExpanded: Boolean
-    ) : GroupedFeedItem()
-
-    data class Feed(
-        val item: FeedItem,
-        val homepageIds: Set<String>
-    ) : GroupedFeedItem()
-}
-
-/**
  * Represents an available feed from a discovered plugin (for the picker).
  */
 data class AvailableFeed(

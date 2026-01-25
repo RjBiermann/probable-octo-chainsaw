@@ -11,7 +11,6 @@ import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -20,7 +19,6 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.widget.NestedScrollView
 import androidx.fragment.app.DialogFragment
-import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
@@ -29,13 +27,11 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.lagradost.cloudstream3.APIHolder.allProviders
-import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
 
 /**
  * Settings fragment for NSFW Ultima with homepage-centric design.
- * Displays homepages directly with tap-to-edit functionality.
- * Supports drag-and-drop reordering (touch) and tap-to-reorder (TV).
+ * Displays homepages alphabetically sorted with tap-to-edit functionality.
  */
 class NsfwUltimaSettingsFragment(
     private val plugin: NsfwUltimaPlugin
@@ -53,13 +49,6 @@ class NsfwUltimaSettingsFragment(
     private lateinit var homepageAdapter: HomepageListAdapter
     private lateinit var homepageRecyclerView: RecyclerView
     private lateinit var emptyStateText: TextView
-    private lateinit var homepageSubtitle: TextView
-    private var reorderModeButton: MaterialButton? = null
-    private var itemTouchHelper: ItemTouchHelper? = null
-
-    // Tap-to-reorder state (TV mode)
-    private var isReorderMode = false
-    private var selectedReorderPosition: Int = -1
 
     private val isTvMode by lazy { TvFocusUtils.isTvMode(requireContext()) }
 
@@ -190,58 +179,22 @@ class NsfwUltimaSettingsFragment(
         // Settings card
         mainContainer.addView(createSettingsCard(context))
 
-        // Your Homepages header row with reorder mode toggle
-        val homepagesHeaderRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            setPadding(0, dp(context, 20), 0, dp(context, 8))
-        }
-
-        homepagesHeaderRow.addView(TextView(context).apply {
+        // Your Homepages header
+        mainContainer.addView(TextView(context).apply {
             text = "Your Homepages"
             textSize = 16f
             setTextColor(textColor)
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(0, dp(context, 20), 0, dp(context, 8))
         })
 
-        // Reorder mode toggle button (TV mode only)
-        if (isTvMode) {
-            reorderModeButton = MaterialButton(
-                context,
-                null,
-                com.google.android.material.R.attr.materialButtonOutlinedStyle
-            ).apply {
-                text = "Reorder"
-                textSize = 12f
-                minimumWidth = 0
-                minimumHeight = 0
-                minWidth = 0
-                minHeight = dp(context, 32)
-                insetTop = 0
-                insetBottom = 0
-                setPadding(dp(context, 12), 0, dp(context, 12), 0)
-                strokeColor = ColorStateList.valueOf(primaryColor)
-                setTextColor(primaryColor)
-                setOnClickListener { toggleReorderMode(context) }
-                TvFocusUtils.makeFocusable(this)
-            }
-            homepagesHeaderRow.addView(reorderModeButton)
-        }
-        mainContainer.addView(homepagesHeaderRow)
-
         // Subtitle
-        homepageSubtitle = TextView(context).apply {
-            text = getSubtitleText()
+        mainContainer.addView(TextView(context).apply {
+            text = "Tap to edit. Sorted alphabetically. App restart required for changes."
             textSize = 13f
             setTextColor(grayTextColor)
             setPadding(0, 0, 0, dp(context, 12))
-        }
-        mainContainer.addView(homepageSubtitle)
+        })
 
         // Empty state text
         emptyStateText = TextView(context).apply {
@@ -296,7 +249,7 @@ class NsfwUltimaSettingsFragment(
         scrollView.addView(mainContainer)
 
         if (isTvMode) {
-            TvFocusUtils.enableFocusLoop(mainContainer)
+            TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, homepageRecyclerView)
         }
 
         return scrollView
@@ -395,16 +348,8 @@ class NsfwUltimaSettingsFragment(
             grayTextColor = grayTextColor,
             primaryColor = primaryColor,
             cardColor = cardColor,
-            onStartDrag = { viewHolder ->
-                itemTouchHelper?.startDrag(viewHolder)
-            },
-            onReorderTap = { position ->
-                onHomepageTappedForReorder(position)
-            },
             onHomepageClick = { homepage ->
-                if (!isReorderMode) {
-                    showHomepageEditor(homepage)
-                }
+                showHomepageEditor(homepage)
             },
             getFeedCount = { homepageId ->
                 FeedAssignmentService.getFeedsInHomepage(feedList, homepageId).size
@@ -412,99 +357,10 @@ class NsfwUltimaSettingsFragment(
         )
         recyclerView.adapter = homepageAdapter
 
-        // Setup drag-and-drop (touch mode)
-        if (!isTvMode) {
-            val touchHelper = HomepageItemTouchHelper(homepageAdapter) {
-                syncHomepagesFromAdapter()
-            }
-            itemTouchHelper = ItemTouchHelper(touchHelper)
-            itemTouchHelper?.attachToRecyclerView(recyclerView)
-        }
-
-        homepageAdapter.submitList(feedGroups)
+        // Display homepages sorted alphabetically
+        homepageAdapter.submitList(feedGroups.sortedBy { it.name.lowercase() })
 
         return recyclerView
-    }
-
-    private fun getSubtitleText(): String {
-        return when {
-            isReorderMode && selectedReorderPosition >= 0 ->
-                "Tap destination to move homepage"
-            isReorderMode ->
-                "Tap a homepage to select, then tap destination"
-            isTvMode ->
-                "Tap to edit, or use Reorder button"
-            else ->
-                "Tap to edit. Drag ≡ to reorder. App restart required for changes."
-        }
-    }
-
-    private fun toggleReorderMode(context: Context) {
-        isReorderMode = !isReorderMode
-        selectedReorderPosition = -1
-
-        reorderModeButton?.apply {
-            if (isReorderMode) {
-                text = "Done"
-                backgroundTintList = ColorStateList.valueOf(primaryColor)
-                setTextColor(0xFFFFFFFF.toInt())
-                strokeWidth = 0
-            } else {
-                text = "Reorder"
-                backgroundTintList = ColorStateList.valueOf(0)
-                setTextColor(primaryColor)
-                strokeColor = ColorStateList.valueOf(primaryColor)
-                strokeWidth = dp(context, 1)
-            }
-        }
-
-        homepageSubtitle.text = getSubtitleText()
-        homepageAdapter.setReorderMode(isReorderMode, -1)
-    }
-
-    private fun onHomepageTappedForReorder(position: Int) {
-        if (!isReorderMode) return
-
-        if (selectedReorderPosition < 0) {
-            selectedReorderPosition = position
-            homepageSubtitle.text = getSubtitleText()
-            homepageAdapter.setReorderMode(true, position)
-            restoreFocusToPosition(position)
-        } else if (selectedReorderPosition == position) {
-            selectedReorderPosition = -1
-            homepageSubtitle.text = getSubtitleText()
-            homepageAdapter.setReorderMode(true, -1)
-            restoreFocusToPosition(position)
-        } else {
-            homepageAdapter.moveItem(selectedReorderPosition, position)
-            syncHomepagesFromAdapter()
-
-            selectedReorderPosition = -1
-            homepageSubtitle.text = getSubtitleText()
-            homepageAdapter.setReorderMode(true, -1)
-            restoreFocusToPosition(position)
-        }
-    }
-
-    private fun restoreFocusToPosition(position: Int) {
-        homepageRecyclerView.post {
-            if (!isAdded || !homepageRecyclerView.isAttachedToWindow) return@post
-            val viewHolder = homepageRecyclerView.findViewHolderForAdapterPosition(position)
-            viewHolder?.itemView?.requestFocus()
-        }
-    }
-
-    private fun syncHomepagesFromAdapter() {
-        feedGroups.clear()
-        feedGroups.addAll(homepageAdapter.getHomepages())
-        updatePriorities()
-        saveData()
-    }
-
-    private fun updatePriorities() {
-        feedGroups.forEachIndexed { index, group ->
-            feedGroups[index] = group.copy(priority = feedGroups.size - index)
-        }
     }
 
     private fun showHomepageEditor(existingHomepage: FeedGroup?) {
@@ -515,13 +371,12 @@ class NsfwUltimaSettingsFragment(
             currentFeeds = feedList,
             availableFeeds = availableFeeds,
             showPluginNames = settings.showPluginNames,
-            onSave = { group, feedsInHomepage, allFeeds ->
+            onSave = { group, _, allFeeds ->
                 val isNew = existingHomepage == null
 
                 // Update homepages
                 if (isNew) {
-                    feedGroups.add(0, group)
-                    updatePriorities()
+                    feedGroups.add(group)
                 } else {
                     val index = feedGroups.indexOfFirst { it.id == group.id }
                     if (index >= 0) {
@@ -554,11 +409,7 @@ class NsfwUltimaSettingsFragment(
 
     private fun deleteHomepage(homepage: FeedGroup) {
         // Remove homepage
-        val index = feedGroups.indexOfFirst { it.id == homepage.id }
-        if (index >= 0) {
-            feedGroups.removeAt(index)
-            updatePriorities()
-        }
+        feedGroups.removeAll { it.id == homepage.id }
 
         // Clear feed assignments for this homepage
         feedList = FeedAssignmentService.clearHomepageAssignments(feedList, homepage.id).toMutableList()
@@ -601,10 +452,10 @@ class NsfwUltimaSettingsFragment(
     }
 
     private fun refreshUI() {
-        homepageAdapter.submitList(feedGroups.toList())
+        homepageAdapter.submitList(feedGroups.sortedBy { it.name.lowercase() })
         updateEmptyState()
         if (isTvMode) {
-            TvFocusUtils.enableFocusLoop(mainContainer)
+            TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, homepageRecyclerView)
         }
     }
 
@@ -675,7 +526,7 @@ class NsfwUltimaSettingsFragment(
 }
 
 /**
- * Adapter for displaying homepages with drag-and-drop (touch) and tap-to-reorder (TV).
+ * Adapter for displaying homepages (sorted alphabetically).
  */
 class HomepageListAdapter(
     private val context: Context,
@@ -684,21 +535,11 @@ class HomepageListAdapter(
     private val grayTextColor: Int,
     private val primaryColor: Int,
     private val cardColor: Int,
-    private val onStartDrag: (viewHolder: RecyclerView.ViewHolder) -> Unit,
-    private val onReorderTap: (position: Int) -> Unit,
     private val onHomepageClick: (FeedGroup) -> Unit,
     private val getFeedCount: (homepageId: String) -> Int
 ) : RecyclerView.Adapter<HomepageListAdapter.HomepageViewHolder>() {
 
     private val homepages = mutableListOf<FeedGroup>()
-    private var reorderModeEnabled = false
-    private var selectedPosition = -1
-
-    fun setReorderMode(enabled: Boolean, selected: Int) {
-        reorderModeEnabled = enabled
-        selectedPosition = selected
-        notifyDataSetChanged()
-    }
 
     @SuppressLint("NotifyDataSetChanged")
     fun submitList(newHomepages: List<FeedGroup>) {
@@ -709,26 +550,7 @@ class HomepageListAdapter(
 
     override fun getItemCount(): Int = homepages.size
 
-    fun getHomepages(): List<FeedGroup> = homepages.toList()
-
-    fun moveItem(from: Int, to: Int) {
-        if (from < 0 || from >= homepages.size || to < 0 || to >= homepages.size) return
-        val item = homepages.removeAt(from)
-        homepages.add(to, item)
-        notifyItemMoved(from, to)
-    }
-
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): HomepageViewHolder {
-        return createViewHolder()
-    }
-
-    override fun onBindViewHolder(holder: HomepageViewHolder, position: Int) {
-        val homepage = homepages[position]
-        bindHomepage(holder, homepage, position)
-    }
-
-    @SuppressLint("ClickableViewAccessibility")
-    private fun createViewHolder(): HomepageViewHolder {
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -741,19 +563,6 @@ class HomepageListAdapter(
             setBackgroundColor(cardColor)
             setPadding(dp(12), dp(14), dp(12), dp(14))
         }
-
-        // Drag handle (touch mode only)
-        val dragHandle: TextView? = if (!isTvMode) {
-            TextView(context).apply {
-                text = "≡"
-                textSize = 20f
-                setTextColor(grayTextColor)
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = dp(12) }
-            }.also { card.addView(it) }
-        } else null
 
         // Content container
         val contentContainer = LinearLayout(context).apply {
@@ -788,26 +597,15 @@ class HomepageListAdapter(
         }
         card.addView(arrowText)
 
-        val holder = HomepageViewHolder(card, dragHandle, nameText, countText, arrowText)
-
-        // Setup drag handle touch listener
-        dragHandle?.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                onStartDrag(holder)
-            }
-            false
-        }
-
         if (isTvMode) {
             TvFocusUtils.makeFocusable(card)
         }
 
-        return holder
+        return HomepageViewHolder(card, nameText, countText)
     }
 
-    @SuppressLint("ClickableViewAccessibility")
-    private fun bindHomepage(holder: HomepageViewHolder, homepage: FeedGroup, position: Int) {
-        val isSelected = reorderModeEnabled && position == selectedPosition
+    override fun onBindViewHolder(holder: HomepageViewHolder, position: Int) {
+        val homepage = homepages[position]
         val feedCount = getFeedCount(homepage.id)
 
         holder.itemView.tag = homepage.id
@@ -816,41 +614,8 @@ class HomepageListAdapter(
         holder.countText.setTextColor(if (feedCount > 0) primaryColor else grayTextColor)
 
         val card = holder.itemView as LinearLayout
-
-        if (reorderModeEnabled) {
-            if (isSelected) {
-                card.setBackgroundColor((primaryColor and 0x00FFFFFF) or 0x30000000)
-                holder.nameText.setTextColor(primaryColor)
-            } else {
-                card.setBackgroundColor(cardColor)
-                holder.nameText.setTextColor(textColor)
-            }
-
-            holder.arrowText.visibility = View.GONE
-            holder.dragHandle?.visibility = View.GONE
-
-            card.isClickable = true
-            card.isFocusable = true
-            if (isTvMode) TvFocusUtils.makeFocusable(card, 8)
-            card.setOnClickListener {
-                val pos = holder.bindingAdapterPosition
-                if (pos != RecyclerView.NO_POSITION) {
-                    onReorderTap(pos)
-                }
-            }
-        } else {
-            card.setBackgroundColor(cardColor)
-            holder.nameText.setTextColor(textColor)
-
-            holder.arrowText.visibility = View.VISIBLE
-            holder.dragHandle?.visibility = View.VISIBLE
-
-            card.isClickable = true
-            card.isFocusable = true
-            if (isTvMode) TvFocusUtils.makeFocusable(card)
-            card.setOnClickListener {
-                onHomepageClick(homepage)
-            }
+        card.setOnClickListener {
+            onHomepageClick(homepage)
         }
     }
 
@@ -858,48 +623,7 @@ class HomepageListAdapter(
 
     class HomepageViewHolder(
         itemView: View,
-        val dragHandle: TextView?,
         val nameText: TextView,
-        val countText: TextView,
-        val arrowText: TextView
+        val countText: TextView
     ) : RecyclerView.ViewHolder(itemView)
-}
-
-/**
- * ItemTouchHelper callback for drag-and-drop reordering of homepages.
- */
-class HomepageItemTouchHelper(
-    private val adapter: HomepageListAdapter,
-    private val onDragComplete: () -> Unit
-) : ItemTouchHelper.Callback() {
-
-    override fun isLongPressDragEnabled(): Boolean = false
-
-    override fun isItemViewSwipeEnabled(): Boolean = false
-
-    override fun getMovementFlags(
-        recyclerView: RecyclerView,
-        viewHolder: RecyclerView.ViewHolder
-    ): Int {
-        val dragFlags = ItemTouchHelper.UP or ItemTouchHelper.DOWN
-        return makeMovementFlags(dragFlags, 0)
-    }
-
-    override fun onMove(
-        recyclerView: RecyclerView,
-        viewHolder: RecyclerView.ViewHolder,
-        target: RecyclerView.ViewHolder
-    ): Boolean {
-        adapter.moveItem(viewHolder.bindingAdapterPosition, target.bindingAdapterPosition)
-        return true
-    }
-
-    override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-        // Not used
-    }
-
-    override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
-        super.clearView(recyclerView, viewHolder)
-        onDragComplete()
-    }
 }
