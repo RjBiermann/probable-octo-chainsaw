@@ -1,4 +1,4 @@
-version = 6
+version = 7
 
 cloudstream {
     description = "PornTrex - HD Porn Videos"
