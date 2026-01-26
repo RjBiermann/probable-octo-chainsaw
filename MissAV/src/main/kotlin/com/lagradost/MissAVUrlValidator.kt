@@ -7,6 +7,8 @@ import java.net.URLDecoder
 
 object MissAVUrlValidator {
     private const val DOMAIN = "missav.ws"
+    /** Max URL length to prevent ReDoS attacks on regex processing */
+    private const val MAX_URL_LENGTH = 2048
 
     // MissAV URL patterns - all use /dm{number}/en/{path} format
     // Examples:
@@ -25,6 +27,8 @@ object MissAVUrlValidator {
     private val SIMPLE_PATH_REGEX = Regex("^/en/(genres|actresses|makers|series|tags)/([^/]+)/?$")
 
     fun validate(url: String): ValidationResult {
+        // ReDoS protection: reject excessively long URLs before regex processing
+        if (url.length > MAX_URL_LENGTH) return ValidationResult.InvalidPath
         if (url.isBlank()) return ValidationResult.InvalidPath
 
         val uri = try {

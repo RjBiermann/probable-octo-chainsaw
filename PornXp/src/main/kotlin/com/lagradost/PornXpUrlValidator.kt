@@ -1,15 +1,21 @@
 package com.lagradost
 
+import com.lagradost.common.StringUtils.capitalizeWords
 import com.lagradost.common.ValidationResult
 import java.net.URI
 import java.net.URLDecoder
 
 object PornXpUrlValidator {
     private const val DOMAIN = "pornxp.ph"
+    /** Max URL length to prevent ReDoS attacks on regex processing */
+    private const val MAX_URL_LENGTH = 2048
     private val MAIN_SECTIONS = listOf("/best/", "/hd/", "/released/")
     private val TAG_REGEX = Regex("^/tags/(.+)$")
 
     fun validate(url: String): ValidationResult {
+        // ReDoS protection: reject excessively long URLs before regex processing
+        if (url.length > MAX_URL_LENGTH) return ValidationResult.InvalidPath
+
         val uri = try {
             URI(url)
         } catch (e: Exception) {
@@ -41,9 +47,4 @@ object PornXpUrlValidator {
 
         return ValidationResult.InvalidPath
     }
-
-    private fun String.capitalizeWords(): String =
-        split(" ").joinToString(" ") { word ->
-            word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-        }
 }

@@ -147,10 +147,88 @@ Shared utilities live in `CommonLib/src/main/kotlin/com/lagradost/common/`:
 - `CustomPageItemTouchHelper.kt` - Drag-and-drop support for touch mode
 - `TvFocusUtils.kt` - Android TV detection and D-pad navigation helpers
 - `DialogUtils.kt` - Theme color resolution, TV/BottomSheet dialog factory, and `showDeleteConfirmation()` for delete actions
+- `CloudstreamUI.kt` - Cloudstream-themed UI component library (chips, buttons, cards, badges)
+- `CloudstreamUIExamples.kt` - Usage examples for CloudstreamUI components
+
+### CloudstreamUI Component Library
+
+`CloudstreamUI` provides programmatic UI components that match Cloudstream's design system exactly. All components auto-resolve theme colors with fallbacks to Cloudstream's default dark theme.
+
+**Color Palette (Cloudstream Dark Theme):**
+- Primary: `#3D50FA` (Indigo Blue)
+- Background: `#111111` / `#2B2C30`
+- Card: `#161616`
+- Text: `#E9EAEE`
+- Gray Text: `#9BA0A4`
+- Error: `#F53B66`
+
+**Available Components:**
+
+```kotlin
+// Resolve theme colors
+val colors = CloudstreamUI.UIColors.fromContext(context)
+
+// Filter Chips (checkable, matches Cloudstream's ChipFilled style)
+CloudstreamUI.createFilterChip(context, "Category", isChecked = true, colors) { checked ->
+    // Handle toggle
+}
+
+// Label Chips (non-interactive tags)
+CloudstreamUI.createLabelChip(context, "HD", colors)
+
+// Colored Chips (status indicators)
+CloudstreamUI.createColoredChip(context, "Active", CloudstreamUI.Colors.SUCCESS)
+
+// Chip Group (container with proper Cloudstream spacing)
+CloudstreamUI.createChipGroup(context, isSingleSelection = true)
+
+// Scrollable Chip Row (for many categories)
+CloudstreamUI.createScrollableChipRow(context, listOf(chip1, chip2, chip3))
+
+// Buttons (matches Cloudstream's NiceButton/BlackButton/WhiteButton)
+CloudstreamUI.createPrimaryButton(context, "Save", colors) { /* onClick */ }
+CloudstreamUI.createSecondaryButton(context, "Cancel", colors) { /* onClick */ }
+CloudstreamUI.createDangerButton(context, "Delete", colors) { /* onClick */ }
+CloudstreamUI.createSmallButton(context, "Edit", isPrimary = true, colors) { /* onClick */ }
+CloudstreamUI.createTextButton(context, "Learn More", colors) { /* onClick */ }
+
+// Cards
+CloudstreamUI.createCard(context, colors)
+CloudstreamUI.createClickableCard(context, colors) { /* onClick */ }
+
+// Text (typography matching Cloudstream)
+CloudstreamUI.createHeaderText(context, "Settings", colors)    // 18sp bold
+CloudstreamUI.createTitleText(context, "Section", colors)      // 16sp bold
+CloudstreamUI.createBodyText(context, "Description", colors)   // 14sp
+CloudstreamUI.createCaptionText(context, "Hint", colors)       // 12sp gray
+
+// Badges
+CloudstreamUI.createBadge(context, "NEW", backgroundColor, textColor)
+CloudstreamUI.createErrorBadge(context, "Failed")
+CloudstreamUI.createSuccessBadge(context, "Active")
+
+// Status Indicator Dot
+CloudstreamUI.createStatusIndicator(context, CloudstreamUI.Status.SUCCESS)
+
+// Pill Toggle Group (segmented control)
+CloudstreamUI.createPillToggleGroup(context, listOf("Grid", "List"), selectedIndex = 0) { index ->
+    // Handle selection
+}
+
+// Utility
+CloudstreamUI.createDivider(context, colors)
+CloudstreamUI.createEmptyState(context, "No items yet", colors)
+CloudstreamUI.createLoadingText(context, "Loading...", colors)
+```
+
+**TV Mode:** All components automatically apply `TvFocusUtils.makeFocusable()` when in TV mode. No additional handling needed.
 
 **Kotlin smart-casts constructor vals:** Constructor `val` parameters (e.g., `val existingGroup: HomepageGroup?`) are smart-cast in lambdas because they can't change. Don't use elvis (`?:`) or non-null assertion (`!!`) on them after null checks - Kotlin handles this automatically.
 
-**RecyclerView focus loop boundaries:** In `enableFocusLoopWithRecyclerView`, the boundary conditions (`if (firstAfterRv != null)`, `if (lastBeforeRv != null)`) are intentional. They only set up page boundary loops when elements exist on that side of the RecyclerView - otherwise, Android's default focus behavior correctly enters the RV from the adjacent element.
+**RecyclerView focus loop boundaries:** In `enableFocusLoopWithRecyclerView`, the boundary conditions determine loop targets based on which side of the RecyclerView has focusable elements:
+- If elements exist AFTER RV: DOWN/UP loops connect non-RV boundary elements
+- If NO elements after RV: UP from firstNonRv loops INTO the RV (last item)
+- If NO elements before RV: Android's default focus enters RV from the adjacent element
 
 **Using CommonLib in a plugin:**
 ```kotlin

@@ -1,5 +1,6 @@
 package com.lagradost.common
 
+import android.os.Build
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 
@@ -11,6 +12,9 @@ class CustomPageItemTouchHelper(
     private val adapter: CustomPagesAdapter,
     private val onMoved: () -> Unit
 ) : ItemTouchHelper.Callback() {
+
+    // Default elevation for drag feedback
+    private var defaultElevation: Float? = null
 
     override fun getMovementFlags(
         recyclerView: RecyclerView,
@@ -50,7 +54,37 @@ class CustomPageItemTouchHelper(
         return false
     }
 
+    override fun onSelectedChanged(viewHolder: RecyclerView.ViewHolder?, actionState: Int) {
+        super.onSelectedChanged(viewHolder, actionState)
+        viewHolder?.itemView?.apply {
+            when (actionState) {
+                ItemTouchHelper.ACTION_STATE_DRAG -> {
+                    // Dragging started - add visual feedback
+                    defaultElevation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        elevation
+                    } else 0f
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        elevation = 8f
+                    }
+                    alpha = 0.9f
+                    scaleX = 1.02f
+                    scaleY = 1.02f
+                }
+            }
+        }
+    }
+
     override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+        // Reset visual feedback
+        viewHolder.itemView.apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                elevation = defaultElevation ?: 0f
+            }
+            alpha = 1f
+            scaleX = 1f
+            scaleY = 1f
+        }
+        defaultElevation = null
         super.clearView(recyclerView, viewHolder)
         // Called when drag is complete
         onMoved()

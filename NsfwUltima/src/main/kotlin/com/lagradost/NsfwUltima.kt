@@ -7,6 +7,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * NsfwUltima MainAPI provider.
@@ -32,6 +33,8 @@ class NsfwUltima(
 
     companion object {
         private const val TAG = "NsfwUltima"
+        /** Maximum number of fallback providers to try when URL doesn't match any provider */
+        private const val MAX_FALLBACK_ATTEMPTS = 3
     }
 
     // Cached data
@@ -262,6 +265,8 @@ class NsfwUltima(
                                     prefixSearchResult(result, provider.name)
                                 } ?: emptyList()
                             }
+                        } catch (e: CancellationException) {
+                            throw e  // Don't swallow coroutine cancellation
                         } catch (e: Exception) {
                             Log.e(TAG, "Search failed for ${provider.name}: ${e.message}")
                             emptyList()
@@ -314,15 +319,24 @@ class NsfwUltima(
                     Log.d(TAG, "Loaded from ${matchingProvider.name}: ${response.name}")
                     return response
                 }
+            } catch (e: CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
                 Log.d(TAG, "Load failed for matching provider ${matchingProvider.name}: ${e.message}")
             }
         }
 
         // Fallback: try other providers (for edge cases like redirects)
+        // Limit to MAX_FALLBACK_ATTEMPTS to avoid excessive network calls
+        var fallbackAttempts = 0
         for (provider in providers) {
             if (provider == matchingProvider) continue  // Already tried
+            if (fallbackAttempts >= MAX_FALLBACK_ATTEMPTS) {
+                Log.d(TAG, "Reached max fallback attempts ($MAX_FALLBACK_ATTEMPTS), stopping load attempts")
+                break
+            }
             try {
+                fallbackAttempts++
                 val response = provider.load(url)
                 if (response != null &&
                     response.name.isNotBlank() &&
@@ -331,6 +345,8 @@ class NsfwUltima(
                     Log.d(TAG, "Loaded from ${provider.name}: ${response.name}")
                     return response
                 }
+            } catch (e: CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
                 Log.d(TAG, "Load failed for ${provider.name}: ${e.message}")
                 // Continue to next provider
@@ -369,20 +385,31 @@ class NsfwUltima(
                     Log.d(TAG, "loadLinks succeeded for matching provider ${matchingProvider.name}")
                     return true
                 }
+            } catch (e: CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
                 Log.d(TAG, "loadLinks failed for matching provider ${matchingProvider.name}: ${e.message}")
             }
         }
 
         // Fallback: try other providers (for edge cases like redirects or extractors)
+        // Limit to MAX_FALLBACK_ATTEMPTS to avoid excessive network calls
+        var fallbackAttempts = 0
         for (provider in providers) {
             if (provider == matchingProvider) continue  // Already tried
+            if (fallbackAttempts >= MAX_FALLBACK_ATTEMPTS) {
+                Log.d(TAG, "Reached max fallback attempts ($MAX_FALLBACK_ATTEMPTS), stopping loadLinks attempts")
+                break
+            }
             try {
+                fallbackAttempts++
                 val success = provider.loadLinks(data, isCasting, subtitleCallback, callback)
                 if (success) {
                     Log.d(TAG, "loadLinks succeeded for ${provider.name}")
                     return true
                 }
+            } catch (e: CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
                 Log.d(TAG, "loadLinks failed for ${provider.name}: ${e.message}")
                 // Continue to next provider

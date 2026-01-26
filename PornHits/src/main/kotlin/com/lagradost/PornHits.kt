@@ -9,10 +9,16 @@ import org.json.JSONObject
 import org.jsoup.nodes.Element
 import java.net.URLDecoder
 import java.net.URLEncoder
+import kotlin.coroutines.cancellation.CancellationException
 
 class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
     companion object {
         private const val TAG = "PornHits"
+
+        // Pre-compiled regex patterns for video extraction
+        private val INIT_PLAYER_REGEX = Regex("""window\.initPlayer\((.*])\);""")
+        private val ENCODED_STRING_REGEX = Regex("""'([^']+)',""")
+        private val SANITIZE_BASE64_REGEX = Regex("[^АВСЕМA-Za-z0-9.,~]")
     }
 
     override var mainUrl = "https://www.pornhits.com"
@@ -52,6 +58,8 @@ class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAP
         val url = request.data.replace("%d", page.toString())
         val document = try {
             app.get(url, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch main page: $url", e)
             throw ErrorLoadingException("Failed to load page. Check your internet connection.")
@@ -73,6 +81,8 @@ class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAP
             val url = "$mainUrl/videos.php?p=$page&q=$encodedQuery"
             val document = try {
                 app.get(url, referer = "$mainUrl/").document
+            } catch (e: CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
                 Log.e(TAG, "Search request failed for page $page", e)
                 break
@@ -90,6 +100,8 @@ class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAP
     override suspend fun load(url: String): LoadResponse? {
         val document = try {
             app.get(url, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load video page: $url", e)
             throw ErrorLoadingException("Failed to load video. Check your internet connection.")
@@ -132,6 +144,8 @@ class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAP
     ): Boolean {
         val document = try {
             app.get(data, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch video page for links: $data", e)
             return false
@@ -145,8 +159,7 @@ class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAP
 
         val isVHQ = script.contains("VHQ")
 
-        val pattern = Regex("""window\.initPlayer\((.*])\);""")
-        val matchResult = pattern.find(script)
+        val matchResult = INIT_PLAYER_REGEX.find(script)
         val jsonArray = matchResult?.groups?.get(1)?.value
         if (jsonArray == null) {
             Log.w(TAG, "Could not find initPlayer call in script")
@@ -239,7 +252,7 @@ class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAP
         val builder = StringBuilder()
         var currentIndex = 0
 
-        val sanitizedString = encodedString.replace("[^АВСЕМA-Za-z0-9.,~]".toRegex(), "")
+        val sanitizedString = encodedString.replace(SANITIZE_BASE64_REGEX, "")
 
         while (currentIndex < sanitizedString.length) {
             val firstCharIndex = base64CharacterSet.indexOf(sanitizedString[currentIndex++])
@@ -275,8 +288,7 @@ class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAP
     }
 
     private fun getEncodedString(json: String?): String? {
-        val stringPattern = Regex("""'([^']+)',""")
-        val stringMatch = stringPattern.find(json ?: "")
+        val stringMatch = ENCODED_STRING_REGEX.find(json ?: "")
         return stringMatch?.groups?.get(1)?.value
     }
 }

@@ -1,11 +1,14 @@
 package com.lagradost
 
+import com.lagradost.common.StringUtils.slugToLabel
 import com.lagradost.common.ValidationResult
 import java.net.URI
 import java.net.URLDecoder
 
 object PerverzijaUrlValidator {
     private const val DOMAIN = "tube.perverzija.com"
+    /** Max URL length to prevent ReDoS attacks on regex processing */
+    private const val MAX_URL_LENGTH = 2048
 
     // URL patterns for perverzija.com
     private val STUDIO_REGEX = Regex("^/studio/([\\w-]+)/?$")
@@ -14,7 +17,13 @@ object PerverzijaUrlValidator {
     private val STARS_REGEX = Regex("^/stars/([\\w-]+)/?$")
     private val SPECIAL_PAGES = listOf("/featured-scenes/")
 
+    // Pre-compiled regex patterns for pagination stripping
+    private val PAGE_PAGINATION_REGEX = Regex("/page/\\d+/$")
+    private val TRAILING_NUMBER_REGEX = Regex("/\\d+/$")
+
     fun validate(url: String): ValidationResult {
+        // ReDoS protection: reject excessively long URLs before regex processing
+        if (url.length > MAX_URL_LENGTH) return ValidationResult.InvalidPath
         if (url.isBlank()) return ValidationResult.InvalidPath
 
         val uri = try {
@@ -32,34 +41,34 @@ object PerverzijaUrlValidator {
 
         // Strip pagination: /studio/brazzers/page/2/ -> /studio/brazzers/
         val path = rawPath
-            .replace(Regex("/page/\\d+/$"), "/")
-            .replace(Regex("/\\d+/$"), "/")
+            .replace(PAGE_PAGINATION_REGEX, "/")
+            .replace(TRAILING_NUMBER_REGEX, "/")
 
         // Check studios (e.g., /studio/brazzers/)
         STUDIO_REGEX.find(path)?.let { match ->
             val slug = match.groupValues[1]
-            val label = slug.replace("-", " ").capitalizeWords()
+            val label = slug.slugToLabel()
             return ValidationResult.Valid(path, label)
         }
 
         // Check sub-studios (e.g., /studio/vxn/blacked/)
         STUDIO_SUB_REGEX.find(path)?.let { match ->
             val subSlug = match.groupValues[2]
-            val label = subSlug.replace("-", " ").capitalizeWords()
+            val label = subSlug.slugToLabel()
             return ValidationResult.Valid(path, label)
         }
 
         // Check tags (e.g., /tag/anal/)
         TAG_REGEX.find(path)?.let { match ->
             val slug = match.groupValues[1]
-            val label = slug.replace("-", " ").capitalizeWords()
+            val label = slug.slugToLabel()
             return ValidationResult.Valid(path, label)
         }
 
         // Check stars (e.g., /stars/angela-white/)
         STARS_REGEX.find(path)?.let { match ->
             val slug = match.groupValues[1]
-            val label = slug.replace("-", " ").capitalizeWords()
+            val label = slug.slugToLabel()
             return ValidationResult.Valid(path, label)
         }
 
@@ -81,16 +90,11 @@ object PerverzijaUrlValidator {
         // Check special pages
         SPECIAL_PAGES.forEach { specialPath ->
             if (path == specialPath || path.startsWith(specialPath)) {
-                val label = specialPath.trim('/').replace("-", " ").capitalizeWords()
+                val label = specialPath.trim('/').slugToLabel()
                 return ValidationResult.Valid(specialPath, label)
             }
         }
 
         return ValidationResult.InvalidPath
     }
-
-    private fun String.capitalizeWords(): String =
-        split(" ").joinToString(" ") { word ->
-            word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-        }
 }

@@ -1,12 +1,23 @@
 package com.lagradost
 
+import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.common.CustomPage
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
+import kotlin.coroutines.cancellation.CancellationException
 
 class Neporn(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+    companion object {
+        private const val TAG = "Neporn"
+
+        // Pre-compiled regex patterns for JSON-LD and flashvars parsing
+        private val JSON_LD_NAME_REGEX = Regex(""""name"\s*:\s*"([^"]+)"""")
+        private val JSON_LD_CONTENT_URL_REGEX = Regex(""""contentUrl"\s*:\s*"([^"]+)"""")
+        private val FLASHVARS_VIDEO_URL_REGEX = Regex("""video_url\s*:\s*'([^']+)'""")
+    }
+
     override var mainUrl = "https://neporn.com"
     override var name = "Neporn"
     override val hasMainPage = true
@@ -29,26 +40,33 @@ class Neporn(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
         }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page > 1) {
-            val separator = if (request.data.contains("?")) "&" else "?"
-            "${request.data}${separator}from=$page"
-        } else request.data
+        return try {
+            val url = if (page > 1) {
+                val separator = if (request.data.contains("?")) "&" else "?"
+                "${request.data}${separator}from=$page"
+            } else request.data
 
-        val response = app.get(url, referer = "$mainUrl/")
+            val response = app.get(url, referer = "$mainUrl/")
 
-        // Detect 404 redirect - site shows fallback content but URL contains /404.php
-        val is404 = response.url.contains("/404.php")
+            // Detect 404 redirect - site shows fallback content but URL contains /404.php
+            val is404 = response.url.contains("/404.php")
 
-        val videos = if (is404) {
-            emptyList()
-        } else {
-            response.document.select("div.list-videos div.item").mapNotNull { parseVideoElement(it) }
+            val videos = if (is404) {
+                emptyList()
+            } else {
+                response.document.select("div.list-videos div.item").mapNotNull { parseVideoElement(it) }
+            }
+
+            newHomePageResponse(
+                HomePageList(request.name, videos, isHorizontalImages = true),
+                hasNext = videos.isNotEmpty() && !is404
+            )
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load main page '${request.name}': ${e.message}")
+            newHomePageResponse(HomePageList(request.name, emptyList()), hasNext = false)
         }
-
-        return newHomePageResponse(
-            HomePageList(request.name, videos, isHorizontalImages = true),
-            hasNext = videos.isNotEmpty() && !is404
-        )
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -56,58 +74,72 @@ class Neporn(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
 
         for (page in 1..5) {
-            val url = if (page == 1) {
-                "$mainUrl/search/?q=$encodedQuery"
-            } else {
-                "$mainUrl/search/?q=$encodedQuery&from_videos=$page&from_albums=$page"
+            try {
+                val url = if (page == 1) {
+                    "$mainUrl/search/?q=$encodedQuery"
+                } else {
+                    "$mainUrl/search/?q=$encodedQuery&from_videos=$page&from_albums=$page"
+                }
+
+                val response = app.get(url, referer = "$mainUrl/")
+
+                // Stop if redirected to 404 page
+                if (response.url.contains("/404.php")) break
+
+                val pageResults = response.document.select("div.list-videos div.item")
+                    .mapNotNull { parseVideoElement(it) }
+
+                if (pageResults.isEmpty()) break
+                results.addAll(pageResults)
+            } catch (e: CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
+            } catch (e: Exception) {
+                Log.w(TAG, "Search failed for '$query' page $page: ${e.message}")
+                break
             }
-
-            val response = app.get(url, referer = "$mainUrl/")
-
-            // Stop if redirected to 404 page
-            if (response.url.contains("/404.php")) break
-
-            val pageResults = response.document.select("div.list-videos div.item")
-                .mapNotNull { parseVideoElement(it) }
-
-            if (pageResults.isEmpty()) break
-            results.addAll(pageResults)
         }
 
         return results.distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url, referer = "$mainUrl/").document
+        return try {
+            val document = app.get(url, referer = "$mainUrl/").document
 
-        // Try JSON-LD first, then fallback to h1
-        val jsonLd = document.selectFirst("script[type=application/ld+json]")?.html()
-        val title = jsonLd?.let {
-            Regex(""""name"\s*:\s*"([^"]+)"""").find(it)?.groupValues?.get(1)
-        } ?: document.selectFirst("div.headline h1")?.text()?.removePrefix("Video: ")?.trim()
-        ?: return null
+            // Try JSON-LD first, then fallback to h1
+            val jsonLd = document.selectFirst("script[type=application/ld+json]")?.html()
+            val title = jsonLd?.let {
+                JSON_LD_NAME_REGEX.find(it)?.groupValues?.get(1)
+            } ?: document.selectFirst("div.headline h1")?.text()?.removePrefix("Video: ")?.trim()
+            ?: return null
 
-        val poster = fixUrlNull(document.selectFirst("meta[property=og:image]")?.attr("content"))
-        val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
+            val poster = fixUrlNull(document.selectFirst("meta[property=og:image]")?.attr("content"))
+            val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
 
-        val tags = document.select("meta[property=video:tag]")
-            .map { it.attr("content").trim() }
-            .filter { it.isNotBlank() }
+            val tags = document.select("meta[property=video:tag]")
+                .map { it.attr("content").trim() }
+                .filter { it.isNotBlank() }
 
-        val actors = document.select("div.info a[href*='/models/']")
-            .map { it.text().trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
+            val actors = document.select("div.info a[href*='/models/']")
+                .map { it.text().trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
 
-        val recommendations = document.select("div.related-videos div.list-videos div.item")
-            .mapNotNull { parseVideoElement(it) }
+            val recommendations = document.select("div.related-videos div.list-videos div.item")
+                .mapNotNull { parseVideoElement(it) }
 
-        return newMovieLoadResponse(title, url, TvType.NSFW, url) {
-            this.posterUrl = poster
-            this.plot = description
-            this.tags = tags
-            this.recommendations = recommendations
-            addActors(actors)
+            newMovieLoadResponse(title, url, TvType.NSFW, url) {
+                this.posterUrl = poster
+                this.plot = description
+                this.tags = tags
+                this.recommendations = recommendations
+                addActors(actors)
+            }
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load video page '$url': ${e.message}")
+            null
         }
     }
 
@@ -117,49 +149,56 @@ class Neporn(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data, referer = "$mainUrl/").document
-        var linksFound = false
+        return try {
+            val document = app.get(data, referer = "$mainUrl/").document
+            var linksFound = false
 
-        // Method 1: JSON-LD schema
-        val jsonLd = document.selectFirst("script[type=application/ld+json]")?.html()
-        if (jsonLd != null) {
-            val contentUrl = Regex(""""contentUrl"\s*:\s*"([^"]+)"""")
-                .find(jsonLd)?.groupValues?.get(1)
-            if (!contentUrl.isNullOrBlank()) {
-                callback(
-                    newExtractorLink(name, name, contentUrl) {
-                        this.referer = data
-                        this.quality = getQualityFromUrl(contentUrl)
-                    }
-                )
-                linksFound = true
+            // Method 1: JSON-LD schema
+            val jsonLd = document.selectFirst("script[type=application/ld+json]")?.html()
+            if (jsonLd != null) {
+                val contentUrl = JSON_LD_CONTENT_URL_REGEX
+                    .find(jsonLd)?.groupValues?.get(1)
+                if (!contentUrl.isNullOrBlank()) {
+                    callback(
+                        newExtractorLink(name, name, contentUrl) {
+                            this.referer = data
+                            this.quality = getQualityFromUrl(contentUrl)
+                        }
+                    )
+                    linksFound = true
+                }
             }
-        }
 
-        // Method 2: flashvars fallback
-        if (!linksFound) {
-            document.select("script").forEach { script ->
-                val html = script.html()
-                if (html.contains("flashvars")) {
-                    val videoUrl = Regex("""video_url\s*:\s*'([^']+)'""")
-                        .find(html)?.groupValues?.get(1)
-                        ?.removePrefix("function/0/")
-                        ?.substringBefore("?br=")
+            // Method 2: flashvars fallback
+            if (!linksFound) {
+                document.select("script").forEach { script ->
+                    val html = script.html()
+                    if (html.contains("flashvars")) {
+                        val videoUrl = FLASHVARS_VIDEO_URL_REGEX
+                            .find(html)?.groupValues?.get(1)
+                            ?.removePrefix("function/0/")
+                            ?.substringBefore("?br=")
 
-                    if (!videoUrl.isNullOrBlank() && videoUrl.startsWith("http")) {
-                        callback(
-                            newExtractorLink(name, "$name - Stream", videoUrl) {
-                                this.referer = data
-                                this.quality = getQualityFromUrl(videoUrl)
-                            }
-                        )
-                        linksFound = true
+                        if (!videoUrl.isNullOrBlank() && videoUrl.startsWith("http")) {
+                            callback(
+                                newExtractorLink(name, "$name - Stream", videoUrl) {
+                                    this.referer = data
+                                    this.quality = getQualityFromUrl(videoUrl)
+                                }
+                            )
+                            linksFound = true
+                        }
                     }
                 }
             }
-        }
 
-        return linksFound
+            linksFound
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load links from '$data': ${e.message}")
+            false
+        }
     }
 
     private fun parseVideoElement(element: Element): SearchResponse? {

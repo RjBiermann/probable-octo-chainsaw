@@ -8,8 +8,16 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.common.CustomPage
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
+import kotlin.coroutines.cancellation.CancellationException
 
 class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+    companion object {
+        private const val TAG = "HQPorner"
+
+        // Pre-compiled regex for extracting img parameter from iframe URL
+        private val IMG_PARAM_REGEX = Regex("""img=([^&]+)""")
+    }
+
     override var mainUrl = "https://hqporner.com"
     override var name = "HQPorner"
     override val hasMainPage = true
@@ -38,8 +46,10 @@ class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAP
 
         val document = try {
             app.get(url, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
-            Log.w("HQPorner", "Failed to load main page '${request.name}': ${e.message}")
+            Log.w(TAG, "Failed to load main page '${request.name}': ${e.message}")
             return newHomePageResponse(
                 HomePageList(request.name, emptyList(), isHorizontalImages = true),
                 hasNext = false
@@ -67,8 +77,10 @@ class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAP
 
             val document = try {
                 app.get(url, referer = "$mainUrl/").document
+            } catch (e: CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
-                Log.w("HQPorner", "Search failed for '$query' page $page: ${e.message}")
+                Log.w(TAG, "Search failed for '$query' page $page: ${e.message}")
                 break
             }
 
@@ -83,52 +95,59 @@ class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAP
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url, referer = "$mainUrl/").document
+        return try {
+            val document = app.get(url, referer = "$mainUrl/").document
 
-        val title = document.selectFirst("h1")?.text()?.trim() ?: return null
-        val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
+            val title = document.selectFirst("h1")?.text()?.trim() ?: return null
+            val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
 
-        // Try to get poster from iframe's img parameter (base64 encoded)
-        // Falls back to og:image meta tag if not found
-        val poster = extractPosterFromIframe(document)
-            ?: fixUrlNull(document.selectFirst("meta[property=og:image]")?.attr("content"))
+            // Try to get poster from iframe's img parameter (base64 encoded)
+            // Falls back to og:image meta tag if not found
+            val poster = extractPosterFromIframe(document)
+                ?: fixUrlNull(document.selectFirst("meta[property=og:image]")?.attr("content"))
 
-        // Extract tags from categories section
-        val tags = document.select("section h3 + p a, p.tag-link a")
-            .map { it.text().trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
+            // Extract tags from categories section
+            val tags = document.select("section h3 + p a, p.tag-link a")
+                .map { it.text().trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
 
-        // Extract actors/actresses
-        val actors = document.select("li.icon.fa-star-o a, a[href*='/actress/']")
-            .map { it.text().trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
+            // Extract actors/actresses
+            val actors = document.select("li.icon.fa-star-o a, a[href*='/actress/']")
+                .map { it.text().trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
 
-        // Parse duration from format like "25m 54s" or "1h 30m 45s"
-        val duration = document.selectFirst("li.icon.fa-clock-o")?.text()?.let { text ->
-            var totalMinutes = 0
-            val parts = text.split(" ")
-            parts.forEach { part ->
-                when {
-                    part.endsWith("h") -> totalMinutes += part.removeSuffix("h").toIntOrNull()?.times(60) ?: 0
-                    part.endsWith("m") -> totalMinutes += part.removeSuffix("m").toIntOrNull() ?: 0
+            // Parse duration from format like "25m 54s" or "1h 30m 45s"
+            val duration = document.selectFirst("li.icon.fa-clock-o")?.text()?.let { text ->
+                var totalMinutes = 0
+                val parts = text.split(" ")
+                parts.forEach { part ->
+                    when {
+                        part.endsWith("h") -> totalMinutes += part.removeSuffix("h").toIntOrNull()?.times(60) ?: 0
+                        part.endsWith("m") -> totalMinutes += part.removeSuffix("m").toIntOrNull() ?: 0
+                    }
                 }
+                if (totalMinutes > 0) totalMinutes else null
             }
-            if (totalMinutes > 0) totalMinutes else null
-        }
 
-        // Get recommendations
-        val recommendations = document.select("div.row section.box.feature:has(span.icon)")
-            .mapNotNull { it.toSearchResult() }
+            // Get recommendations
+            val recommendations = document.select("div.row section.box.feature:has(span.icon)")
+                .mapNotNull { it.toSearchResult() }
 
-        return newMovieLoadResponse(title, url, TvType.NSFW, url) {
-            this.posterUrl = poster
-            this.plot = description
-            this.tags = tags
-            this.duration = duration
-            this.recommendations = recommendations
-            addActors(actors)
+            newMovieLoadResponse(title, url, TvType.NSFW, url) {
+                this.posterUrl = poster
+                this.plot = description
+                this.tags = tags
+                this.duration = duration
+                this.recommendations = recommendations
+                addActors(actors)
+            }
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load video page '$url': ${e.message}")
+            null
         }
     }
 
@@ -138,39 +157,46 @@ class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAP
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(
-            data,
-            referer = "$mainUrl/",
-            headers = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:144.0) Gecko/20100101 Firefox/144.0",
-                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language" to "en-US,en;q=0.5"
-            )
-        ).document
+        return try {
+            val document = app.get(
+                data,
+                referer = "$mainUrl/",
+                headers = mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:144.0) Gecko/20100101 Firefox/144.0",
+                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language" to "en-US,en;q=0.5"
+                )
+            ).document
 
-        // Try to find any iframe (mydaddy.cc, hqwo.cc, or other embed)
-        val iframes = document.select("iframe")
-        var foundVideo = false
+            // Try to find any iframe (mydaddy.cc, hqwo.cc, or other embed)
+            val iframes = document.select("iframe")
+            var foundVideo = false
 
-        for (iframe in iframes) {
-            val src = iframe.attr("src")
-            if (src.isBlank()) continue
+            for (iframe in iframes) {
+                val src = iframe.attr("src")
+                if (src.isBlank()) continue
 
-            val iframeUrl = fixUrl(src)
+                val iframeUrl = fixUrl(src)
 
-            // Skip ad iframes
-            if (iframeUrl.contains("ads") || iframeUrl.contains("banner")) continue
+                // Skip ad iframes
+                if (iframeUrl.contains("ads") || iframeUrl.contains("banner")) continue
 
-            // Extract from known embed domains
-            when {
-                iframeUrl.contains("mydaddy.cc") || iframeUrl.contains("hqwo.cc") -> {
-                    loadExtractor(iframeUrl, "$mainUrl/", subtitleCallback, callback)
-                    foundVideo = true
+                // Extract from known embed domains
+                when {
+                    iframeUrl.contains("mydaddy.cc") || iframeUrl.contains("hqwo.cc") -> {
+                        loadExtractor(iframeUrl, "$mainUrl/", subtitleCallback, callback)
+                        foundVideo = true
+                    }
                 }
             }
-        }
 
-        return foundVideo
+            foundVideo
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load links from '$data': ${e.message}")
+            false
+        }
     }
 
     /**
@@ -198,7 +224,7 @@ class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAP
         // Try 3: Extract from iframe's img parameter (base64 encoded)
         val iframeSrc = document.selectFirst("iframe")?.attr("src")
         if (iframeSrc != null) {
-            val imgParam = Regex("""img=([^&]+)""").find(iframeSrc)?.groupValues?.get(1)
+            val imgParam = IMG_PARAM_REGEX.find(iframeSrc)?.groupValues?.get(1)
             if (imgParam != null) {
                 try {
                     val decoded = String(Base64.decode(imgParam, Base64.DEFAULT))

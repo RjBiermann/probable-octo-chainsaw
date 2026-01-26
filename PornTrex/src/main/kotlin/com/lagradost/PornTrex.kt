@@ -5,9 +5,27 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.common.CustomPage
+import com.lagradost.common.DurationUtils
 import org.jsoup.nodes.Element
+import kotlin.coroutines.cancellation.CancellationException
 
 class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+    companion object {
+        private const val TAG = "PornTrex"
+
+        // Pre-compiled regex patterns for flashvars video URL extraction
+        private val FLASHVARS_URL_PATTERNS = mapOf(
+            "video_url" to Regex("""video_url\s*:\s*'([^']+)'"""),
+            "video_alt_url" to Regex("""video_alt_url\s*:\s*'([^']+)'"""),
+            "video_alt_url2" to Regex("""video_alt_url2\s*:\s*'([^']+)'""")
+        )
+        private val FLASHVARS_TEXT_PATTERNS = mapOf(
+            "video_url" to Regex("""video_url_text\s*:\s*'([^']+)'"""),
+            "video_alt_url" to Regex("""video_alt_url_text\s*:\s*'([^']+)'"""),
+            "video_alt_url2" to Regex("""video_alt_url2_text\s*:\s*'([^']+)'""")
+        )
+    }
+
     override var mainUrl = "https://www.porntrex.com"
     override var name = "PornTrex"
     override val hasMainPage = true
@@ -39,8 +57,10 @@ class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAP
 
         val document = try {
             app.get(url, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
-            Log.w("PornTrex", "Failed to load main page '${request.name}': ${e.message}")
+            Log.w(TAG, "Failed to load main page '${request.name}': ${e.message}")
             return newHomePageResponse(
                 HomePageList(request.name, emptyList(), isHorizontalImages = true),
                 hasNext = false
@@ -72,8 +92,10 @@ class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAP
 
             val document = try {
                 app.get(url, referer = "$mainUrl/").document
+            } catch (e: CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
-                Log.w("PornTrex", "Search failed for '$query' page $page: ${e.message}")
+                Log.w(TAG, "Search failed for '$query' page $page: ${e.message}")
                 break
             }
 
@@ -93,8 +115,10 @@ class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAP
     override suspend fun load(url: String): LoadResponse? {
         val document = try {
             app.get(url, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
-            Log.w("PornTrex", "Failed to load '$url': ${e.message}")
+            Log.w(TAG, "Failed to load '$url': ${e.message}")
             return null
         }
 
@@ -130,7 +154,7 @@ class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAP
 
         // Parse duration from video info
         val duration = document.selectFirst(".info-block .duration, .video-info .duration, [class*=duration]")
-            ?.text()?.let { parseDuration(it) }
+            ?.text()?.let { DurationUtils.parseDuration(it) }
 
         // Get recommendations
         val recommendations = document.select(".related-videos .video-preview-screen")
@@ -154,8 +178,10 @@ class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAP
     ): Boolean {
         val document = try {
             app.get(data, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
-            Log.w("PornTrex", "Failed to load links from '$data': ${e.message}")
+            Log.w(TAG, "Failed to load links from '$data': ${e.message}")
             return false
         }
         var linksFound = false
@@ -171,10 +197,10 @@ class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAP
             val html = script.html()
             if (html.contains("flashvars")) {
                 videoKeys.forEach { (key, defaultQuality) ->
-                    val url = Regex("""$key\s*:\s*'([^']+)'""").find(html)?.groupValues?.get(1)
+                    val url = FLASHVARS_URL_PATTERNS[key]?.find(html)?.groupValues?.get(1)
                         ?.removePrefix("function/0/")
                         ?.substringBefore("?br=")
-                    val qualityText = Regex("""${key}_text\s*:\s*'([^']+)'""").find(html)?.groupValues?.get(1) ?: defaultQuality
+                    val qualityText = FLASHVARS_TEXT_PATTERNS[key]?.find(html)?.groupValues?.get(1) ?: defaultQuality
 
                     if (!url.isNullOrBlank() && url.startsWith("http")) {
                         callback(
@@ -237,48 +263,5 @@ class PornTrex(private val customPages: List<CustomPage> = emptyList()) : MainAP
         text.contains("360") -> Qualities.P360.value
         text.contains("HD", ignoreCase = true) -> Qualities.P720.value
         else -> Qualities.Unknown.value
-    }
-
-    /**
-     * Parse duration from text like "25m 54s", "1h 30m 45s", "10:25", or "1:30:45"
-     * Returns duration in minutes.
-     */
-    private fun parseDuration(text: String): Int? {
-        var totalMinutes = 0
-
-        // Handle format with h/m/s suffixes (e.g., "1h 30m 45s")
-        val parts = text.split(" ")
-        parts.forEach { part ->
-            when {
-                part.endsWith("h") -> totalMinutes += part.removeSuffix("h").toIntOrNull()?.times(60) ?: 0
-                part.endsWith("m") -> totalMinutes += part.removeSuffix("m").toIntOrNull() ?: 0
-                part.endsWith("min") -> totalMinutes += part.removeSuffix("min").toIntOrNull() ?: 0
-            }
-        }
-
-        // If we found time parts, return the total
-        if (totalMinutes > 0) return totalMinutes
-
-        // Handle colon-separated format (e.g., "10:25" or "1:30:45")
-        val colonParts = text.split(":")
-        return try {
-            when (colonParts.size) {
-                2 -> {
-                    // MM:SS format - return minutes (at least 1 for sub-minute videos)
-                    val mins = colonParts[0].toIntOrNull() ?: 0
-                    val secs = colonParts[1].toIntOrNull() ?: 0
-                    if (mins == 0 && secs > 0) 1 else mins
-                }
-                3 -> {
-                    // HH:MM:SS format - return hours*60 + minutes
-                    val hours = colonParts[0].toIntOrNull() ?: 0
-                    val mins = colonParts[1].toIntOrNull() ?: 0
-                    hours * 60 + mins
-                }
-                else -> null
-            }
-        } catch (e: Exception) {
-            null
-        }
     }
 }

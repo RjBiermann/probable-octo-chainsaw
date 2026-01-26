@@ -10,6 +10,12 @@ import com.lagradost.cloudstream3.utils.*
  * https://s{n}.bigcdn.cc/pubs/{id}/{quality}.mp4
  */
 class MyDaddyExtractor : ExtractorApi() {
+    companion object {
+        // Pre-compiled regex patterns for video URL extraction
+        private val BIGCDN_REGEX = Regex("""((?:s\d+\.)?bigcdn\.cc/pubs/[a-zA-Z0-9.]+)/(\d+)\.mp4""")
+        private val HREF_REGEX = Regex("""a href='([^']*)'""", RegexOption.IGNORE_CASE)
+    }
+
     override val name = "MyDaddy"
     override val mainUrl = "https://mydaddy.cc"
     override val requiresReferer = true
@@ -24,8 +30,7 @@ class MyDaddyExtractor : ExtractorApi() {
 
         // Primary pattern: bigcdn.cc URLs like bigcdn.cc/pubs/696c6bd5427405.98321240/720.mp4
         // Can have optional server prefix like s29.bigcdn.cc or just bigcdn.cc
-        val bigcdnRegex = Regex("""((?:s\d+\.)?bigcdn\.cc/pubs/[a-zA-Z0-9.]+)/(\d+)\.mp4""")
-        val bigcdnMatches = bigcdnRegex.findAll(response)
+        val bigcdnMatches = BIGCDN_REGEX.findAll(response)
         val seenUrls = mutableSetOf<String>()
 
         bigcdnMatches.forEach { match ->
@@ -61,8 +66,7 @@ class MyDaddyExtractor : ExtractorApi() {
 
         // Fallback: try older anchor href pattern (a href='...')
         if (seenUrls.isEmpty()) {
-            val hrefRegex = Regex("""a href='([^']*)'""", RegexOption.IGNORE_CASE)
-            hrefRegex.findAll(response).forEach { match ->
+            HREF_REGEX.findAll(response).forEach { match ->
                 val videoUrl = match.groupValues[1]
                 if (videoUrl.startsWith("http") && videoUrl !in seenUrls) {
                     seenUrls.add(videoUrl)

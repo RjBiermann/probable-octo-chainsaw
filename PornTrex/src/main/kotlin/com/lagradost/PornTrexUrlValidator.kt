@@ -8,6 +8,8 @@ import java.net.URI
  * Supports categories, tags, models, channels, and search queries.
  */
 object PornTrexUrlValidator {
+    /** Max URL length to prevent ReDoS attacks on regex processing */
+    private const val MAX_URL_LENGTH = 2048
 
     private val CATEGORY_REGEX = Regex("""/categories/([^/?]+)/?""")
     private val TAG_REGEX = Regex("""/tags/([^/?]+)/?""")
@@ -16,6 +18,9 @@ object PornTrexUrlValidator {
     private val SEARCH_REGEX = Regex("""/search/\?query=([^&]+)""")
     // Path-based search format: /search/term/ (without query parameter)
     private val SEARCH_PATH_REGEX = Regex("""/search/([^/?]+)/?""")
+
+    // Pre-compiled regex for pagination stripping
+    private val PAGINATION_REGEX = Regex("""/\d+/?$""")
 
     private val SPECIAL_PAGES = mapOf(
         "/top-rated/" to "Top Rated",
@@ -27,6 +32,8 @@ object PornTrexUrlValidator {
 
     fun validate(url: String): ValidationResult {
         val trimmedUrl = url.trim()
+        // ReDoS protection: reject excessively long URLs before regex processing
+        if (trimmedUrl.length > MAX_URL_LENGTH) return ValidationResult.InvalidPath
         if (trimmedUrl.isBlank()) return ValidationResult.InvalidPath
 
         val parsed = try {
@@ -44,7 +51,7 @@ object PornTrexUrlValidator {
         val path = parsed.path?.let { normalizePath(it) } ?: "/"
 
         // Strip pagination from path (e.g., /categories/amateur/2/ -> /categories/amateur/)
-        val cleanPath = path.replace(Regex("""/\d+/?$"""), "/")
+        val cleanPath = path.replace(PAGINATION_REGEX, "/")
 
         // Check special pages first
         SPECIAL_PAGES.forEach { (pagePath, label) ->

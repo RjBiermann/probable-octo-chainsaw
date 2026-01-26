@@ -16,6 +16,9 @@ import java.net.URLEncoder
 class MissAV(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
     companion object {
         private const val TAG = "MissAV"
+
+        // Pre-compiled regex pattern for video source extraction
+        private val SOURCE_URL_REGEX = Regex("""source='([^']*)'""")
     }
 
     override var mainUrl = "https://missav.ws"
@@ -272,7 +275,7 @@ class MissAV(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
             val response = app.get(data)
             val unpackedText = getAndUnpack(response.text)
 
-            val m3u8Url = """source='([^']*)'""".toRegex().find(unpackedText)?.groupValues?.get(1)
+            val m3u8Url = SOURCE_URL_REGEX.find(unpackedText)?.groupValues?.get(1)
             if (m3u8Url == null) {
                 Log.w(TAG, "No source URL found in unpacked script for: $data")
                 return false

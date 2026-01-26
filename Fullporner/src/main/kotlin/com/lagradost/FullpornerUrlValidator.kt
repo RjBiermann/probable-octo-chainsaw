@@ -1,5 +1,6 @@
 package com.lagradost
 
+import com.lagradost.common.StringUtils.slugToLabel
 import com.lagradost.common.ValidationResult
 import java.net.URI
 import java.net.URLDecoder
@@ -7,6 +8,8 @@ import java.net.URLEncoder
 
 object FullpornerUrlValidator {
     private const val DOMAIN = "fullporner.com"
+    /** Max URL length to prevent ReDoS attacks on regex processing */
+    private const val MAX_URL_LENGTH = 2048
 
     // Regex patterns for different URL types
     private val CATEGORY_REGEX = Regex("^/category/([^/]+)/?$")
@@ -16,6 +19,8 @@ object FullpornerUrlValidator {
     private val SEARCH_REGEX = Regex("^/search$")
 
     fun validate(url: String): ValidationResult {
+        // ReDoS protection: reject excessively long URLs before regex processing
+        if (url.length > MAX_URL_LENGTH) return ValidationResult.InvalidPath
         if (url.isBlank()) return ValidationResult.InvalidPath
 
         val uri = try {
@@ -54,37 +59,24 @@ object FullpornerUrlValidator {
         // Check /category/{slug}
         CATEGORY_REGEX.find(path)?.let { match ->
             val slug = match.groupValues[1]
-            val label = slug.slugToLabel()
+            val label = slug.slugToLabel(urlDecode = true)
             return ValidationResult.Valid("/category/$slug", label)
         }
 
         // Check /pornstar/{slug}
         PORNSTAR_REGEX.find(path)?.let { match ->
             val slug = match.groupValues[1]
-            val label = slug.slugToLabel()
+            val label = slug.slugToLabel(urlDecode = true)
             return ValidationResult.Valid("/pornstar/$slug", label)
         }
 
         // Check /channel/{slug}
         CHANNEL_REGEX.find(path)?.let { match ->
             val slug = match.groupValues[1]
-            val label = slug.slugToLabel()
+            val label = slug.slugToLabel(urlDecode = true)
             return ValidationResult.Valid("/channel/$slug", label)
         }
 
         return ValidationResult.InvalidPath
-    }
-
-    private fun String.slugToLabel(): String {
-        return try {
-            URLDecoder.decode(this, "UTF-8")
-        } catch (e: Exception) {
-            this
-        }
-            .replace("-", " ")
-            .split(" ")
-            .joinToString(" ") { word ->
-                word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-            }
     }
 }

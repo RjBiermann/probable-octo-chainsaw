@@ -10,6 +10,7 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 
 /**
@@ -31,6 +32,29 @@ class CustomPagesAdapter(
         private const val TAG = "CustomPagesAdapter"
     }
 
+    /**
+     * DiffUtil callback for calculating differences between CustomPage lists.
+     */
+    private class PagesDiffCallback(
+        private val oldList: List<CustomPage>,
+        private val newList: List<CustomPage>
+    ) : DiffUtil.Callback() {
+        override fun getOldListSize() = oldList.size
+        override fun getNewListSize() = newList.size
+
+        override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+            // Items are the same if they have the same path (unique identifier)
+            return oldList[oldItemPosition].path == newList[newItemPosition].path
+        }
+
+        override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+            // Contents are the same if both path and label match
+            val old = oldList[oldItemPosition]
+            val new = newList[newItemPosition]
+            return old.path == new.path && old.label == new.label
+        }
+    }
+
     init {
         setHasStableIds(true)
     }
@@ -50,9 +74,27 @@ class CustomPagesAdapter(
      * - Selected item is highlighted with primary color
      */
     fun setReorderMode(enabled: Boolean, selected: Int) {
+        val wasReorderMode = reorderModeEnabled
+        val oldSelected = selectedPosition
         reorderModeEnabled = enabled
         selectedPosition = selected
-        notifyDataSetChanged()
+
+        // Only notify changes for affected items to avoid full rebind
+        when {
+            wasReorderMode != enabled -> {
+                // Mode changed - rebind all items
+                notifyItemRangeChanged(0, filteredItems.size)
+            }
+            oldSelected != selected -> {
+                // Just selection changed - only update affected items
+                if (oldSelected in 0 until filteredItems.size) {
+                    notifyItemChanged(oldSelected)
+                }
+                if (selected in 0 until filteredItems.size) {
+                    notifyItemChanged(selected)
+                }
+            }
+        }
     }
 
     /**
@@ -73,6 +115,8 @@ class CustomPagesAdapter(
     }
 
     private fun applyFilter() {
+        val oldFiltered = filteredItems.toList()
+
         filteredItems.clear()
         if (filterQuery.isBlank()) {
             filteredItems.addAll(items)
@@ -81,7 +125,10 @@ class CustomPagesAdapter(
                 it.label.contains(filterQuery, ignoreCase = true)
             })
         }
-        notifyDataSetChanged()
+
+        // Use DiffUtil for efficient updates
+        val diffResult = DiffUtil.calculateDiff(PagesDiffCallback(oldFiltered, filteredItems))
+        diffResult.dispatchUpdatesTo(this)
     }
 
     /**
@@ -175,6 +222,7 @@ class CustomPagesAdapter(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply { marginEnd = dp(12) }
+                contentDescription = "Drag to reorder"
             }.also { row.addView(it) }
         } else null
 
@@ -221,6 +269,10 @@ class CustomPagesAdapter(
         holder.itemView.tag = page.path
 
         holder.label.text = page.label
+
+        // Update content descriptions with item name
+        holder.removeButton.contentDescription = "Remove ${page.label}"
+        holder.dragHandle?.contentDescription = "Drag to reorder ${page.label}"
 
         // Get the row for background manipulation
         val row = holder.itemView as LinearLayout
@@ -282,7 +334,7 @@ class CustomPagesAdapter(
         }
     }
 
-    private fun dp(dp: Int): Int = (dp * context.resources.displayMetrics.density).toInt()
+    private fun dp(dp: Int): Int = TvFocusUtils.dpToPx(context, dp)
 
     class ViewHolder(
         itemView: View,

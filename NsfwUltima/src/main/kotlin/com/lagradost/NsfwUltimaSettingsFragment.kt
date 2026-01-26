@@ -1,5 +1,6 @@
 package com.lagradost
 
+import com.lagradost.common.CloudstreamUI
 import com.lagradost.common.TvFocusUtils
 
 import android.annotation.SuppressLint
@@ -8,7 +9,6 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.os.Bundle
 import android.util.Log
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
@@ -25,7 +25,6 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
-import com.google.android.material.switchmaterial.SwitchMaterial
 import com.lagradost.cloudstream3.APIHolder.allProviders
 import com.lagradost.cloudstream3.TvType
 
@@ -52,45 +51,17 @@ class NsfwUltimaSettingsFragment(
 
     private val isTvMode by lazy { TvFocusUtils.isTvMode(requireContext()) }
 
-    // Theme colors
-    private var textColor: Int = 0
-    private var grayTextColor: Int = 0
-    private var backgroundColor: Int = 0
-    private var cardColor: Int = 0
-    private var primaryColor: Int = 0
-
-    private fun resolveThemeColors(context: Context) {
-        val tv = TypedValue()
-        val theme = context.theme
-
-        textColor = resolveAttr(theme, tv, "textColor", android.R.attr.textColorPrimary, context)
-        grayTextColor = resolveAttr(theme, tv, "grayTextColor", android.R.attr.textColorSecondary, context)
-        backgroundColor = resolveAttr(theme, tv, "primaryBlackBackground", android.R.attr.colorBackground, context)
-        cardColor = resolveAttr(theme, tv, "boxItemBackground", android.R.attr.colorBackgroundFloating, context)
-        primaryColor = resolveAttr(theme, tv, "colorPrimary", android.R.attr.colorPrimary, context)
-    }
-
-    private fun resolveAttr(
-        theme: android.content.res.Resources.Theme,
-        tv: TypedValue,
-        customAttr: String,
-        fallbackAttr: Int,
-        context: Context
-    ): Int {
-        val customId = context.resources.getIdentifier(customAttr, "attr", context.packageName)
-        return if (customId != 0 && theme.resolveAttribute(customId, tv, true)) {
-            tv.data
-        } else if (theme.resolveAttribute(fallbackAttr, tv, true)) {
-            tv.data
-        } else {
-            Log.w(TAG, "Failed to resolve theme attribute: $customAttr")
-            0
-        }
-    }
+    // Theme colors using CloudstreamUI
+    private lateinit var colors: CloudstreamUI.UIColors
+    private val textColor get() = colors.text
+    private val grayTextColor get() = colors.textGray
+    private val backgroundColor get() = colors.background
+    private val cardColor get() = colors.card
+    private val primaryColor get() = colors.primary
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val context = requireContext()
-        resolveThemeColors(context)
+        colors = CloudstreamUI.UIColors.fromContext(context)
         loadData()
 
         val contentView = createSettingsView(context)
@@ -168,11 +139,7 @@ class NsfwUltimaSettingsFragment(
         }
 
         // Title
-        mainContainer.addView(TextView(context).apply {
-            text = "NSFW Ultima Settings"
-            textSize = 20f
-            setTextColor(textColor)
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        mainContainer.addView(CloudstreamUI.createDialogTitle(context, "NSFW Ultima Settings", colors).apply {
             setPadding(0, 0, 0, dp(context, 16))
         })
 
@@ -180,29 +147,18 @@ class NsfwUltimaSettingsFragment(
         mainContainer.addView(createSettingsCard(context))
 
         // Your Homepages header
-        mainContainer.addView(TextView(context).apply {
-            text = "Your Homepages"
-            textSize = 16f
-            setTextColor(textColor)
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        mainContainer.addView(CloudstreamUI.createTitleText(context, "Your Homepages", colors).apply {
             setPadding(0, dp(context, 20), 0, dp(context, 8))
         })
 
         // Subtitle
-        mainContainer.addView(TextView(context).apply {
-            text = "Tap to edit. Sorted alphabetically. App restart required for changes."
+        mainContainer.addView(CloudstreamUI.createCaptionText(context, "Tap to edit. Sorted alphabetically. App restart required for changes.", colors).apply {
             textSize = 13f
-            setTextColor(grayTextColor)
             setPadding(0, 0, 0, dp(context, 12))
         })
 
         // Empty state text
-        emptyStateText = TextView(context).apply {
-            text = "No homepages yet.\nCreate one below to get started."
-            textSize = 14f
-            setTextColor(grayTextColor)
-            gravity = Gravity.CENTER
-            setPadding(dp(context, 16), dp(context, 24), dp(context, 16), dp(context, 24))
+        emptyStateText = CloudstreamUI.createEmptyState(context, "No homepages yet.\nCreate one below to get started.", colors).apply {
             visibility = if (feedGroups.isEmpty()) View.VISIBLE else View.GONE
         }
         mainContainer.addView(emptyStateText)
@@ -212,27 +168,21 @@ class NsfwUltimaSettingsFragment(
         mainContainer.addView(homepageRecyclerView)
 
         // Create Homepage button
-        mainContainer.addView(MaterialButton(context).apply {
-            text = "Create New Homepage"
-            textSize = 15f
+        mainContainer.addView(CloudstreamUI.createPrimaryButton(context, "Create New Homepage", colors) {
+            showHomepageEditor(null)
+        }.apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
                 topMargin = dp(context, 16)
             }
-            backgroundTintList = ColorStateList.valueOf(primaryColor)
-            setOnClickListener { showHomepageEditor(null) }
-            if (isTvMode) TvFocusUtils.makeFocusable(this)
         })
 
         // Reset All Data button
-        mainContainer.addView(MaterialButton(
-            context,
-            null,
-            com.google.android.material.R.attr.materialButtonOutlinedStyle
-        ).apply {
-            text = "Reset All Data"
+        mainContainer.addView(CloudstreamUI.createSecondaryButton(context, "Reset All Data", colors) {
+            showResetConfirmation(context)
+        }.apply {
             textSize = 14f
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -240,10 +190,6 @@ class NsfwUltimaSettingsFragment(
             ).apply {
                 topMargin = dp(context, 12)
             }
-            strokeColor = ColorStateList.valueOf(grayTextColor)
-            setTextColor(grayTextColor)
-            setOnClickListener { showResetConfirmation(context) }
-            if (isTvMode) TvFocusUtils.makeFocusable(this)
         })
 
         scrollView.addView(mainContainer)
@@ -255,16 +201,8 @@ class NsfwUltimaSettingsFragment(
         return scrollView
     }
 
-    private fun createSettingsCard(context: Context): MaterialCardView {
-        val card = MaterialCardView(context).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            setCardBackgroundColor(cardColor)
-            radius = dp(context, 12).toFloat()
-            cardElevation = 0f
-        }
+    private fun createSettingsCard(context: Context): com.google.android.material.card.MaterialCardView {
+        val card = CloudstreamUI.createCard(context, colors, CloudstreamUI.Dimens.CORNER_RADIUS_LARGE)
 
         val cardContent = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -278,10 +216,13 @@ class NsfwUltimaSettingsFragment(
             subtitle = "Prefix feeds with [PluginName]",
             isChecked = settings.showPluginNames
         ) { isChecked ->
+            val originalSettings = settings
             settings = settings.copy(showPluginNames = isChecked)
             if (!NsfwUltimaStorage.saveSettings(settings)) {
                 Log.e(TAG, "Failed to save settings")
+                settings = originalSettings  // Revert in-memory state
                 showSaveErrorToast()
+                return@createToggleRow
             }
             plugin.refreshAllHomepages()
         })
@@ -307,23 +248,15 @@ class NsfwUltimaSettingsFragment(
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
 
-        textContainer.addView(TextView(context).apply {
-            text = title
+        textContainer.addView(CloudstreamUI.createBodyText(context, title, colors).apply {
             textSize = 15f
-            setTextColor(textColor)
         })
 
-        textContainer.addView(TextView(context).apply {
-            text = subtitle
-            textSize = 12f
-            setTextColor(grayTextColor)
-        })
+        textContainer.addView(CloudstreamUI.createCaptionText(context, subtitle, colors))
 
-        val toggle = SwitchMaterial(context).apply {
-            this.isChecked = isChecked
-            setOnCheckedChangeListener { _, checked -> onChanged(checked) }
+        val toggle = CloudstreamUI.createSwitch(context, isChecked, colors) { checked ->
+            onChanged(checked)
         }
-        if (isTvMode) TvFocusUtils.makeFocusable(toggle)
 
         row.addView(textContainer)
         row.addView(toggle)
@@ -371,8 +304,12 @@ class NsfwUltimaSettingsFragment(
             currentFeeds = feedList,
             availableFeeds = availableFeeds,
             showPluginNames = settings.showPluginNames,
-            onSave = { group, _, allFeeds ->
+            onSave = onSave@{ group, _, allFeeds ->
                 val isNew = existingHomepage == null
+
+                // Store original state for rollback
+                val originalGroups = feedGroups.toList()
+                val originalFeeds = feedList.toList()
 
                 // Update homepages
                 if (isNew) {
@@ -388,10 +325,20 @@ class NsfwUltimaSettingsFragment(
                 feedList.clear()
                 feedList.addAll(allFeeds)
 
-                saveData()
+                // Save and rollback on failure
+                if (!saveData()) {
+                    feedGroups.clear()
+                    feedGroups.addAll(originalGroups)
+                    feedList.clear()
+                    feedList.addAll(originalFeeds)
+                    showSaveErrorToast()
+                    refreshUI()
+                    return@onSave
+                }
+
                 refreshUI()
 
-                // Show restart reminder
+                // Show restart reminder only after confirmed save
                 context?.let { ctx ->
                     android.widget.Toast.makeText(
                         ctx,
@@ -408,6 +355,10 @@ class NsfwUltimaSettingsFragment(
     }
 
     private fun deleteHomepage(homepage: FeedGroup) {
+        // Store original state for rollback
+        val originalGroups = feedGroups.toList()
+        val originalFeeds = feedList.toList()
+
         // Remove homepage
         feedGroups.removeAll { it.id == homepage.id }
 
@@ -416,7 +367,17 @@ class NsfwUltimaSettingsFragment(
         // Remove orphaned feeds
         feedList = feedList.filter { it.homepageIds.isNotEmpty() }.toMutableList()
 
-        saveData()
+        // Save and rollback on failure
+        if (!saveData()) {
+            feedGroups.clear()
+            feedGroups.addAll(originalGroups)
+            feedList.clear()
+            feedList.addAll(originalFeeds)
+            showSaveErrorToast()
+            refreshUI()
+            return
+        }
+
         refreshUI()
 
         context?.let { ctx ->
@@ -465,16 +426,17 @@ class NsfwUltimaSettingsFragment(
         homepageRecyclerView.visibility = if (isEmpty) View.GONE else View.VISIBLE
     }
 
-    private fun saveData() {
+    private fun saveData(): Boolean {
         val feedsSaved = NsfwUltimaStorage.saveFeedList(feedList)
         val groupsSaved = NsfwUltimaStorage.saveGroups(feedGroups)
 
         if (!feedsSaved || !groupsSaved) {
             Log.e(TAG, "Failed to save: feeds=$feedsSaved, groups=$groupsSaved")
-            showSaveErrorToast()
+            return false
         }
 
         plugin.refreshAllHomepages()
+        return true
     }
 
     private fun showSaveErrorToast() {
@@ -521,8 +483,15 @@ class NsfwUltimaSettingsFragment(
             .show()
     }
 
-    private fun dp(context: Context, dp: Int): Int =
-        (dp * context.resources.displayMetrics.density).toInt()
+    private fun dp(context: Context, dp: Int): Int = TvFocusUtils.dpToPx(context, dp)
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        // Clear RecyclerView adapter to prevent memory leaks
+        if (::homepageRecyclerView.isInitialized) {
+            homepageRecyclerView.adapter = null
+        }
+    }
 }
 
 /**
@@ -541,14 +510,21 @@ class HomepageListAdapter(
 
     private val homepages = mutableListOf<FeedGroup>()
 
-    @SuppressLint("NotifyDataSetChanged")
+    init {
+        setHasStableIds(true)
+    }
+
     fun submitList(newHomepages: List<FeedGroup>) {
+        val diffCallback = HomepageDiffCallback(homepages.toList(), newHomepages)
+        val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(diffCallback)
         homepages.clear()
         homepages.addAll(newHomepages)
-        notifyDataSetChanged()
+        diffResult.dispatchUpdatesTo(this)
     }
 
     override fun getItemCount(): Int = homepages.size
+
+    override fun getItemId(position: Int): Long = homepages[position].id.hashCode().toLong()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): HomepageViewHolder {
         val card = LinearLayout(context).apply {
@@ -562,6 +538,12 @@ class HomepageListAdapter(
             }
             setBackgroundColor(cardColor)
             setPadding(dp(12), dp(14), dp(12), dp(14))
+            // Add ripple feedback
+            isClickable = true
+            val rippleAttr = android.R.attr.selectableItemBackground
+            val typedValue = android.util.TypedValue()
+            context.theme.resolveAttribute(rippleAttr, typedValue, true)
+            foreground = androidx.core.content.ContextCompat.getDrawable(context, typedValue.resourceId)
         }
 
         // Content container
@@ -591,9 +573,10 @@ class HomepageListAdapter(
 
         // Arrow indicator
         val arrowText = TextView(context).apply {
-            text = "→"
+            text = ">"
             textSize = 18f
             setTextColor(grayTextColor)
+            contentDescription = "Edit"
         }
         card.addView(arrowText)
 
@@ -612,6 +595,7 @@ class HomepageListAdapter(
         holder.nameText.text = homepage.name
         holder.countText.text = "$feedCount feeds"
         holder.countText.setTextColor(if (feedCount > 0) primaryColor else grayTextColor)
+        holder.itemView.contentDescription = "${homepage.name}, $feedCount feeds. Tap to edit."
 
         val card = holder.itemView as LinearLayout
         card.setOnClickListener {
@@ -619,7 +603,19 @@ class HomepageListAdapter(
         }
     }
 
-    private fun dp(dp: Int): Int = (dp * context.resources.displayMetrics.density).toInt()
+    private fun dp(dp: Int): Int = TvFocusUtils.dpToPx(context, dp)
+
+    private class HomepageDiffCallback(
+        private val oldList: List<FeedGroup>,
+        private val newList: List<FeedGroup>
+    ) : androidx.recyclerview.widget.DiffUtil.Callback() {
+        override fun getOldListSize() = oldList.size
+        override fun getNewListSize() = newList.size
+        override fun areItemsTheSame(oldPos: Int, newPos: Int) =
+            oldList[oldPos].id == newList[newPos].id
+        override fun areContentsTheSame(oldPos: Int, newPos: Int) =
+            oldList[oldPos] == newList[newPos]
+    }
 
     class HomepageViewHolder(
         itemView: View,

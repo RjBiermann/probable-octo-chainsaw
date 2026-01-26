@@ -4,9 +4,16 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.common.CustomPage
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
+import android.util.Log
 import org.jsoup.nodes.Element
+import java.net.URLEncoder
+import kotlin.coroutines.cancellation.CancellationException
 
 class PornXp(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+    companion object {
+        private const val TAG = "PornXp"
+    }
+
     override var mainUrl = "https://pornxp.ph"
     override var name = "PornXP"
     override val hasMainPage = true
@@ -36,8 +43,10 @@ class PornXp(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
 
         val document = try {
             app.get(url, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
-            // HTTP error (e.g., 404, 500) indicates no more pages
+            Log.w(TAG, "Failed to load main page '${request.name}': ${e.message}")
             return newHomePageResponse(
                 HomePageList(request.name, emptyList(), isHorizontalImages = true),
                 hasNext = false
@@ -57,14 +66,17 @@ class PornXp(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
 
     override suspend fun search(query: String): List<SearchResponse> {
         val results = mutableListOf<SearchResponse>()
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
 
         for (page in 1..5) {
-            val url = if (page == 1) "$mainUrl/tags/$query" else "$mainUrl/tags/$query?page=$page"
+            val url = if (page == 1) "$mainUrl/tags/$encodedQuery" else "$mainUrl/tags/$encodedQuery?page=$page"
 
             val document = try {
                 app.get(url, referer = "$mainUrl/").document
+            } catch (e: CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
-                // HTTP error - stop pagination
+                Log.w(TAG, "Search failed for '$query' page $page: ${e.message}")
                 break
             }
 
@@ -81,7 +93,14 @@ class PornXp(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url, referer = "$mainUrl/").document
+        val document = try {
+            app.get(url, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load '$url': ${e.message}")
+            return null
+        }
 
         val title = document.selectFirst("div.player_details h1")?.text()?.trim()
             ?: document.selectFirst("h1")?.text()?.trim()
@@ -117,7 +136,14 @@ class PornXp(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data, referer = "$mainUrl/").document
+        val document = try {
+            app.get(data, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load links from '$data': ${e.message}")
+            return false
+        }
         var linksFound = false
 
         document.select("video#player source").forEach { source ->

@@ -8,8 +8,12 @@ import java.net.URLDecoder
 object PornHitsUrlValidator {
     private const val DOMAIN = "pornhits.com"
     private const val WWW_DOMAIN = "www.pornhits.com"
+    /** Max URL length to prevent ReDoS attacks on regex processing */
+    private const val MAX_URL_LENGTH = 2048
 
     fun validate(url: String): ValidationResult {
+        // ReDoS protection: reject excessively long URLs before regex processing
+        if (url.length > MAX_URL_LENGTH) return ValidationResult.InvalidPath
         if (url.isBlank()) return ValidationResult.InvalidPath
 
         val uri = try {

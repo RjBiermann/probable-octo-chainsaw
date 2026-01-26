@@ -7,6 +7,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
+import kotlin.coroutines.cancellation.CancellationException
 
 class Perverzija(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
     companion object {
@@ -37,6 +38,8 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
 
         val response = try {
             app.get(url, interceptor = cfInterceptor, timeout = 30L)
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load '${request.name}' from: $url", e)
             return newHomePageResponse(
@@ -64,6 +67,8 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
 
             val response = try {
                 app.get(url, interceptor = cfInterceptor, timeout = 30L)
+            } catch (e: CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
                 Log.w(TAG, "Search request failed for page $page: $url", e)
                 break
@@ -82,6 +87,8 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
     override suspend fun load(url: String): LoadResponse? {
         val document = try {
             app.get(url, interceptor = cfInterceptor, timeout = 30L).document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load video page: $url", e)
             return null
@@ -129,6 +136,8 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
     ): Boolean {
         val document = try {
             app.get(data, interceptor = cfInterceptor, timeout = 30L).document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch video page for links: $data", e)
             return false

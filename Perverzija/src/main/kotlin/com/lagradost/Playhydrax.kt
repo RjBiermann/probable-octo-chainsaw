@@ -46,6 +46,14 @@ open class Playhydrax : ExtractorApi() {
         private const val VERSION = "v2.0-2026-01-19"  // Version identifier for debugging
         // Regex to capture GCS URLs from page/requests
         private val GCS_URL_REGEX = Regex("""https?://storage\.googleapis\.com/mediastorage/[^"'\s\\<>]+\.mp4[^"'\s\\<>]*""")
+
+        // Pre-compiled regex patterns for video extraction
+        private val BASE64_DATA_REGEX = Regex("""(?:const|var)\s+datas\s*=\s*["']([A-Za-z0-9+/=]+)["']""")
+        private val GCS_GENERIC_REGEX = Regex("""https?://storage\.googleapis\.com/[^"'\s\\]+""")
+        private val GCS_MP4_REGEX = Regex("""https?://storage\.googleapis\.com/mediastorage/[^'"#\s]+\.mp4""")
+        private val SSSRR_REGEX = Regex("""https?://[a-z0-9]+\.sssrr\.org/[^'"#\s]+""")
+        private val M3U8_REGEX = Regex("""https?://[^'"#\s]+\.m3u8[^'"#\s]*""")
+        private val QUALITY_NUMBER_REGEX = Regex("[^0-9]")
     }
 
     private val cfInterceptor = CloudflareKiller()
@@ -190,8 +198,7 @@ open class Playhydrax : ExtractorApi() {
      */
     private fun extractAndDecryptMedia(html: String): JSONObject? {
         // Pattern: const datas = "BASE64_STRING" or var datas = "BASE64_STRING"
-        val base64Regex = Regex("""(?:const|var)\s+datas\s*=\s*["']([A-Za-z0-9+/=]+)["']""")
-        val match = base64Regex.find(html) ?: return null
+        val match = BASE64_DATA_REGEX.find(html) ?: return null
 
         return try {
             val base64Data = match.groupValues[1]
@@ -298,9 +305,8 @@ open class Playhydrax : ExtractorApi() {
 
             // Priority 1: Look for Google Cloud Storage URLs anywhere in the JSON
             val mediaString = mediaData.toString()
-            val gcsRegex = Regex("""https?://storage\.googleapis\.com/[^"'\s\\]+""")
             val seenGcsUrls = mutableSetOf<String>()
-            gcsRegex.findAll(mediaString).forEach { match ->
+            GCS_GENERIC_REGEX.findAll(mediaString).forEach { match ->
                 val fullUrl = match.value
                 val quality = getQualityFromUrl(fullUrl)
                 val baseUrl = fullUrl.substringBefore("#")
@@ -557,8 +563,7 @@ open class Playhydrax : ExtractorApi() {
         val seenUrls = mutableSetOf<String>()
 
         // Pattern 1: sssrr.org CDN URLs
-        val sssrrRegex = Regex("""https?://[a-z0-9]+\.sssrr\.org/[^'"#\s]+""")
-        sssrrRegex.findAll(html).forEach { match ->
+        SSSRR_REGEX.findAll(html).forEach { match ->
             val url = match.value.substringBefore("#").substringBefore("\"")
             if (url !in seenUrls && url.contains("/c/")) {
                 seenUrls.add(url)
@@ -567,8 +572,7 @@ open class Playhydrax : ExtractorApi() {
         }
 
         // Pattern 2: Google Cloud Storage URLs
-        val gcsRegex = Regex("""https?://storage\.googleapis\.com/mediastorage/[^'"#\s]+\.mp4""")
-        gcsRegex.findAll(html).forEach { match ->
+        GCS_MP4_REGEX.findAll(html).forEach { match ->
             val url = match.value.substringBefore("#")
             if (url !in seenUrls) {
                 seenUrls.add(url)
@@ -577,8 +581,7 @@ open class Playhydrax : ExtractorApi() {
         }
 
         // Pattern 3: M3U8 URLs
-        val m3u8Regex = Regex("""https?://[^'"#\s]+\.m3u8[^'"#\s]*""")
-        m3u8Regex.find(html)?.let { match ->
+        M3U8_REGEX.find(html)?.let { match ->
             val url = match.value.substringBefore("#")
             if (url !in seenUrls) {
                 seenUrls.add(url)
@@ -640,7 +643,7 @@ open class Playhydrax : ExtractorApi() {
     }
 
     private fun getQualityFromLabel(label: String): Int {
-        val qualityNum = label.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 720
+        val qualityNum = label.replace(QUALITY_NUMBER_REGEX, "").toIntOrNull() ?: 720
         return when (qualityNum) {
             2160 -> Qualities.P2160.value
             1440 -> Qualities.P1440.value

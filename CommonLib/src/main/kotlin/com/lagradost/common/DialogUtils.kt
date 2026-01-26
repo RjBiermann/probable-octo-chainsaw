@@ -23,7 +23,9 @@ object DialogUtils {
         val grayTextColor: Int,
         val backgroundColor: Int,
         val cardColor: Int,
-        val primaryColor: Int
+        val primaryColor: Int,
+        val errorColor: Int,
+        val onPrimaryColor: Int
     )
 
     /**
@@ -39,7 +41,9 @@ object DialogUtils {
             grayTextColor = resolveAttr(theme, tv, "grayTextColor", android.R.attr.textColorSecondary, context),
             backgroundColor = resolveAttr(theme, tv, "primaryBlackBackground", android.R.attr.colorBackground, context),
             cardColor = resolveAttr(theme, tv, "boxItemBackground", android.R.attr.colorBackgroundFloating, context),
-            primaryColor = resolveAttr(theme, tv, "colorPrimary", android.R.attr.colorPrimary, context)
+            primaryColor = resolveAttr(theme, tv, "colorPrimary", android.R.attr.colorPrimary, context),
+            errorColor = resolveAttrWithDefault(theme, tv, "colorError", android.R.attr.colorError, context, 0xFFE53935.toInt()),
+            onPrimaryColor = resolveAttrWithDefault(theme, tv, "colorOnPrimary", android.R.attr.colorForeground, context, 0xFFFFFFFF.toInt())
         )
     }
 
@@ -63,6 +67,22 @@ object DialogUtils {
         } else {
             0
         }
+    }
+
+    /**
+     * Resolve a theme attribute with a hardcoded default when resolution fails.
+     * Useful for colors like error/onPrimary that need sensible defaults.
+     */
+    private fun resolveAttrWithDefault(
+        theme: android.content.res.Resources.Theme,
+        tv: TypedValue,
+        customAttr: String,
+        fallbackAttr: Int,
+        context: Context,
+        defaultValue: Int
+    ): Int {
+        val result = resolveAttr(theme, tv, customAttr, fallbackAttr, context)
+        return if (result != 0) result else defaultValue
     }
 
     /**

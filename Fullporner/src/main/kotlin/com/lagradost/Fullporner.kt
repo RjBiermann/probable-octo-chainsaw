@@ -2,13 +2,25 @@ package com.lagradost
 
 import android.util.Log
 import com.lagradost.common.CustomPage
+import com.lagradost.common.DurationUtils
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
+import kotlin.coroutines.cancellation.CancellationException
 
 class Fullporner(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+    companion object {
+        private const val TAG = "Fullporner"
+
+        // Pre-compiled regex patterns for video extraction
+        private val VIDEO_ID_FROM_IFRAME_REGEX = Regex("""/video/([^/]+)/""")
+        private val VIDEO_ID_FROM_URL_REGEX = Regex("""/watch/([a-zA-Z0-9]+)""")
+        private val PREVIEW_URL_REGEX = Regex("""(?:preview_url|poster)\s*[=:]\s*['"]([^'"]+)['"]""")
+        private val VAR_ID_REGEX = Regex("""var\s+id\s*=\s*["']([^"']+)["']""")
+    }
+
     override var mainUrl = "https://fullporner.com"
     override var name = "Fullporner"
     override val hasMainPage = true
@@ -39,8 +51,10 @@ class Fullporner(private val customPages: List<CustomPage> = emptyList()) : Main
 
         val document = try {
             app.get(url, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
-            Log.w("Fullporner", "Failed to load main page '${request.name}': ${e.message}")
+            Log.w(TAG, "Failed to load main page '${request.name}': ${e.message}")
             return newHomePageResponse(
                 HomePageList(request.name, emptyList(), isHorizontalImages = true),
                 hasNext = false
@@ -68,8 +82,10 @@ class Fullporner(private val customPages: List<CustomPage> = emptyList()) : Main
 
             val document = try {
                 app.get(url, referer = "$mainUrl/").document
+            } catch (e: CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
-                Log.w("Fullporner", "Search failed for '$query' page $page: ${e.message}")
+                Log.w(TAG, "Search failed for '$query' page $page: ${e.message}")
                 break
             }
 
@@ -89,8 +105,10 @@ class Fullporner(private val customPages: List<CustomPage> = emptyList()) : Main
     override suspend fun load(url: String): LoadResponse? {
         val document = try {
             app.get(url, referer = "$mainUrl/").document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
-            Log.w("Fullporner", "Failed to load video page '$url': ${e.message}")
+            Log.w(TAG, "Failed to load video page '$url': ${e.message}")
             return null
         }
 
@@ -122,7 +140,7 @@ class Fullporner(private val customPages: List<CustomPage> = emptyList()) : Main
 
         // Parse duration from the page (format: MM:SS or HH:MM:SS)
         val durationText = document.selectFirst("*:matchesOwn(^\\d{1,2}:\\d{2}(:\\d{2})?$)")?.text()
-        val duration = durationText?.let { parseDuration(it) }
+        val duration = durationText?.let { DurationUtils.parseDuration(it) }
 
         // Get recommendations from related videos
         val recommendations = document.select(".video-card")
@@ -156,8 +174,10 @@ class Fullporner(private val customPages: List<CustomPage> = emptyList()) : Main
                     "Accept-Language" to "en-US,en;q=0.5"
                 )
             ).document
+        } catch (e: CancellationException) {
+            throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
-            Log.w("Fullporner", "Failed to load links for '$data': ${e.message}")
+            Log.w(TAG, "Failed to load links for '$data': ${e.message}")
             return false
         }
 
@@ -213,20 +233,6 @@ class Fullporner(private val customPages: List<CustomPage> = emptyList()) : Main
         }
     }
 
-    private fun parseDuration(text: String): Int? {
-        val parts = text.split(":").reversed()
-        val seconds = parts.getOrNull(0)?.toIntOrNull() ?: 0
-        val minutes = parts.getOrNull(1)?.toIntOrNull() ?: 0
-        val hours = parts.getOrNull(2)?.toIntOrNull() ?: 0
-        val totalMinutes = minutes + (hours * 60)
-        // Return at least 1 minute for any non-zero duration
-        return when {
-            totalMinutes > 0 -> totalMinutes
-            seconds > 0 -> 1
-            else -> null
-        }
-    }
-
     /**
      * Extract poster URL for a video.
      *
@@ -250,7 +256,7 @@ class Fullporner(private val customPages: List<CustomPage> = emptyList()) : Main
             ?: document.selectFirst("div.single-video iframe")?.attr("src")
 
         if (iframeSrc != null && iframeSrc.contains("xiaoshenke.net/video/")) {
-            val idMatch = Regex("""/video/([^/]+)/""").find(iframeSrc)
+            val idMatch = VIDEO_ID_FROM_IFRAME_REGEX.find(iframeSrc)
             // Reverse the path ID to get the original video ID
             val videoId = idMatch?.groupValues?.get(1)?.reversed()
             if (videoId != null) {
@@ -261,7 +267,7 @@ class Fullporner(private val customPages: List<CustomPage> = emptyList()) : Main
         }
 
         // Strategy 2: Construct iframe URL and fetch poster from JavaScript variables
-        val pageVideoId = Regex("""/watch/([a-zA-Z0-9]+)""").find(pageUrl)?.groupValues?.get(1)
+        val pageVideoId = VIDEO_ID_FROM_URL_REGEX.find(pageUrl)?.groupValues?.get(1)
         if (pageVideoId != null) {
             // Page URL has video ID in normal form; iframe path uses reversed form
             val iframePathId = pageVideoId.reversed()
@@ -271,14 +277,14 @@ class Fullporner(private val customPages: List<CustomPage> = emptyList()) : Main
                 val iframeDoc = app.get(constructedIframeUrl, referer = pageUrl).text
 
                 // Strategy 2a: Look for poster/preview URL in iframe JavaScript
-                val previewMatch = Regex("""(?:preview_url|poster)\s*[=:]\s*['"]([^'"]+)['"]""").find(iframeDoc)
+                val previewMatch = PREVIEW_URL_REGEX.find(iframeDoc)
                 if (previewMatch != null) {
                     val previewUrl = previewMatch.groupValues[1]
                     return if (previewUrl.startsWith("//")) "https:$previewUrl" else previewUrl
                 }
 
                 // Strategy 2b: Extract video ID from iframe JavaScript (var id = "xxx") - also stored reversed
-                val idMatch = Regex("""var\s+id\s*=\s*["']([^"']+)["']""").find(iframeDoc)
+                val idMatch = VAR_ID_REGEX.find(iframeDoc)
                 val iframeVideoId = idMatch?.groupValues?.get(1)
                 if (iframeVideoId != null) {
                     return buildPosterUrl(iframeVideoId.reversed())

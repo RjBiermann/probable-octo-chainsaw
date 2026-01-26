@@ -3,6 +3,7 @@ package com.lagradost.common
 import android.app.UiModeManager
 import android.content.Context
 import android.util.Log
+import android.util.TypedValue
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
@@ -139,12 +140,13 @@ object TvFocusUtils {
      * @param defaultColor The default stroke color when unfocused
      */
     fun makeFocusableTextInput(layout: TextInputLayout, defaultColor: Int) {
-        // Create a ColorStateList that shows white when focused, default color otherwise
+        val focusColor = resolveFocusColor(layout.context)
+        // Create a ColorStateList that shows focus color when focused, default color otherwise
         val states = arrayOf(
             intArrayOf(android.R.attr.state_focused),
             intArrayOf() // default state
         )
-        val colors = intArrayOf(Color.WHITE, defaultColor)
+        val colors = intArrayOf(focusColor, defaultColor)
         val colorStateList = ColorStateList(states, colors)
 
         layout.setBoxStrokeColorStateList(colorStateList)
@@ -153,19 +155,57 @@ object TvFocusUtils {
     }
 
     /**
-     * Create a 2dp white border drawable for focus indication.
-     * Matches Cloudstream's outline.xml pattern - stroke only, no fill.
+     * Create a 2dp border drawable for focus indication.
+     * Uses a theme-aware focus color that works on both light and dark themes.
      */
     private fun createFocusBorder(context: Context, cornerRadiusDp: Int): GradientDrawable {
         val strokeWidth = dpToPx(context, 2)
         val cornerRadius = dpToPx(context, cornerRadiusDp).toFloat()
+        val focusColor = resolveFocusColor(context)
 
         return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setStroke(strokeWidth, Color.WHITE)
+            setStroke(strokeWidth, focusColor)
             this.cornerRadius = cornerRadius
-            // No setColor() call - stroke only, no fill (matches outline.xml)
+            // No setColor() call - stroke only, no fill
         }
+    }
+
+    /**
+     * Resolve the focus indicator color from the theme.
+     * Falls back to white for dark themes, primary color for light themes.
+     */
+    private fun resolveFocusColor(context: Context): Int {
+        val tv = TypedValue()
+        val theme = context.theme
+
+        // Try to get colorControlHighlight first (theme-appropriate highlight)
+        if (theme.resolveAttribute(android.R.attr.colorControlHighlight, tv, true)) {
+            // colorControlHighlight is often semi-transparent, make it opaque for border
+            val color = tv.data
+            val alpha = Color.alpha(color)
+            if (alpha < 255) {
+                // Make opaque but use the same RGB values
+                return Color.argb(255, Color.red(color), Color.green(color), Color.blue(color))
+            }
+            return color
+        }
+
+        // Try to get colorPrimary as fallback
+        if (theme.resolveAttribute(android.R.attr.colorPrimary, tv, true)) {
+            return tv.data
+        }
+
+        // Final fallback: white for dark backgrounds, accent blue for light
+        return if (isDarkTheme(context)) Color.WHITE else Color.parseColor("#1976D2")
+    }
+
+    /**
+     * Detect if the current theme is a dark theme.
+     */
+    private fun isDarkTheme(context: Context): Boolean {
+        val nightModeFlags = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        return nightModeFlags == Configuration.UI_MODE_NIGHT_YES
     }
 
     /**
@@ -278,6 +318,7 @@ object TvFocusUtils {
             lastNonRv,
             lastBeforeRv,
             firstAfterRv,
+            recyclerView,
             focusState
         )
 
@@ -431,16 +472,20 @@ object TvFocusUtils {
     /**
      * Set up focus loops for non-RecyclerView boundary elements.
      * Creates full page loops: DOWN from last element -> first element, UP from first -> last.
+     *
+     * @param recyclerView Needed for looping into RV when no elements exist on one side
      */
     private fun setupNonRvBoundaryLoops(
         firstNonRv: View,
         lastNonRv: View,
         lastBeforeRv: View?,
         firstAfterRv: View?,
+        recyclerView: RecyclerView,
         focusState: RecyclerViewFocusState
     ) {
         // DOWN from lastNonRv: loop to first element on page (full page loop)
         if (firstAfterRv != null) {
+            // lastNonRv is after RV, so DOWN loops back to firstNonRv
             attachBoundaryKeyListener(
                 view = lastNonRv,
                 keyCode = KeyEvent.KEYCODE_DPAD_DOWN,
@@ -448,16 +493,58 @@ object TvFocusUtils {
                 focusState = focusState
             )
         }
+        // Note: if firstAfterRv == null, lastNonRv is before RV, and DOWN will naturally enter RV
 
         // UP from firstNonRv: loop to last element on page (full page loop)
-        if (lastBeforeRv != null) {
+        if (firstAfterRv != null) {
+            // There are elements after RV, so lastNonRv is the true last element
             attachBoundaryKeyListener(
                 view = firstNonRv,
                 keyCode = KeyEvent.KEYCODE_DPAD_UP,
                 target = lastNonRv,
                 focusState = focusState
             )
+        } else if (lastBeforeRv != null) {
+            // No elements after RV - the last element on page is inside RV
+            // UP from firstNonRv should scroll RV to last item and focus it
+            attachBoundaryKeyListenerToRv(
+                view = firstNonRv,
+                keyCode = KeyEvent.KEYCODE_DPAD_UP,
+                recyclerView = recyclerView,
+                toLastItem = true,
+                focusState = focusState
+            )
         }
+        // Note: if lastBeforeRv == null, firstNonRv is after RV, and UP will naturally enter RV
+    }
+
+    /**
+     * Attach a key listener that scrolls to an RV item and focuses it.
+     * Used when looping from non-RV elements into the RecyclerView.
+     *
+     * @param toLastItem If true, scrolls to last item; if false, scrolls to first item
+     */
+    private fun attachBoundaryKeyListenerToRv(
+        view: View,
+        keyCode: Int,
+        recyclerView: RecyclerView,
+        toLastItem: Boolean,
+        focusState: RecyclerViewFocusState
+    ) {
+        val listener = View.OnKeyListener { _, code, event ->
+            if (code == keyCode && event.action == KeyEvent.ACTION_DOWN) {
+                val itemCount = recyclerView.adapter?.itemCount ?: 0
+                if (itemCount > 0) {
+                    val targetPosition = if (toLastItem) itemCount - 1 else 0
+                    scrollToPositionAndFocus(recyclerView, targetPosition)
+                }
+                true
+            } else {
+                false
+            }
+        }
+        view.setOnKeyListener(listener)
+        focusState.nonRvBoundaryListeners[view] = listener
     }
 
     /**

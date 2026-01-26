@@ -11,6 +11,12 @@ import com.lagradost.cloudstream3.utils.*
  * - bigcdn.cc/pubs/{id}/{quality}.mp4
  */
 class HQWOExtractor : ExtractorApi() {
+    companion object {
+        // Pre-compiled regex patterns for video URL extraction
+        private val BIGCDN_REGEX = Regex("""((?:s\d+\.)?bigcdn\.cc/pubs/[a-zA-Z0-9.]+)/(\d+)\.mp4""")
+        private val HQWO_REGEX = Regex("""//hqwo\.cc/pubs/([a-zA-Z0-9]+)/(\d+)\.mp4""")
+    }
+
     override val name = "HQWO"
     override val mainUrl = "https://hqwo.cc"
     override val requiresReferer = true
@@ -26,8 +32,7 @@ class HQWOExtractor : ExtractorApi() {
         val seenUrls = mutableSetOf<String>()
 
         // Pattern 1: bigcdn.cc URLs (primary CDN)
-        val bigcdnRegex = Regex("""((?:s\d+\.)?bigcdn\.cc/pubs/[a-zA-Z0-9.]+)/(\d+)\.mp4""")
-        bigcdnRegex.findAll(response).forEach { match ->
+        BIGCDN_REGEX.findAll(response).forEach { match ->
             val basePath = match.groupValues[1]
             val quality = match.groupValues[2]
             val videoUrl = "https://$basePath/$quality.mp4"
@@ -49,8 +54,7 @@ class HQWOExtractor : ExtractorApi() {
         }
 
         // Pattern 2: hqwo.cc URLs (fallback)
-        val hqwoRegex = Regex("""//hqwo\.cc/pubs/([a-zA-Z0-9]+)/(\d+)\.mp4""")
-        hqwoRegex.findAll(response).forEach { match ->
+        HQWO_REGEX.findAll(response).forEach { match ->
             val videoUrl = "https:${match.value}"
 
             if (videoUrl !in seenUrls) {

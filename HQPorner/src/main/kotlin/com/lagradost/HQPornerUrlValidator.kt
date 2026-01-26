@@ -1,11 +1,14 @@
 package com.lagradost
 
+import com.lagradost.common.StringUtils.slugToLabel
 import com.lagradost.common.ValidationResult
 import java.net.URI
 import java.net.URLDecoder
 
 object HQPornerUrlValidator {
     private const val DOMAIN = "hqporner.com"
+    /** Max URL length to prevent ReDoS attacks on regex processing */
+    private const val MAX_URL_LENGTH = 2048
 
     // Regex patterns for different URL types
     private val CATEGORY_REGEX = Regex("^/category/([^/]+)/?$")
@@ -15,6 +18,8 @@ object HQPornerUrlValidator {
     private val HDPORN_REGEX = Regex("^/hdporn/?$")
 
     fun validate(url: String): ValidationResult {
+        // ReDoS protection: reject excessively long URLs before regex processing
+        if (url.length > MAX_URL_LENGTH) return ValidationResult.InvalidPath
         if (url.isBlank()) return ValidationResult.InvalidPath
 
         val uri = try {
@@ -58,37 +63,24 @@ object HQPornerUrlValidator {
         // Check /category/{slug}
         CATEGORY_REGEX.find(path)?.let { match ->
             val slug = match.groupValues[1]
-            val label = slug.slugToLabel()
+            val label = slug.slugToLabel(urlDecode = true)
             return ValidationResult.Valid("/category/$slug", label)
         }
 
         // Check /actress/{slug}
         ACTRESS_REGEX.find(path)?.let { match ->
             val slug = match.groupValues[1]
-            val label = slug.slugToLabel()
+            val label = slug.slugToLabel(urlDecode = true)
             return ValidationResult.Valid("/actress/$slug", label)
         }
 
         // Check /studio/{slug}
         STUDIO_REGEX.find(path)?.let { match ->
             val slug = match.groupValues[1]
-            val label = slug.slugToLabel()
+            val label = slug.slugToLabel(urlDecode = true)
             return ValidationResult.Valid("/studio/$slug", label)
         }
 
         return ValidationResult.InvalidPath
-    }
-
-    private fun String.slugToLabel(): String {
-        return try {
-            URLDecoder.decode(this, "UTF-8")
-        } catch (e: Exception) {
-            this
-        }
-            .replace("-", " ")
-            .split(" ")
-            .joinToString(" ") { word ->
-                word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-            }
     }
 }

@@ -15,6 +15,12 @@ import com.lagradost.cloudstream3.utils.*
  * - URLs built as: //xiaoshenke.net/vid/{reversed_id}/{quality_number}
  */
 class FullpornerExtractor : ExtractorApi() {
+    companion object {
+        // Pre-compiled regex patterns for video extraction
+        private val VAR_ID_REGEX = Regex("""var\s+id\s*=\s*["']([^"']+)["']""")
+        private val VAR_QUALITY_REGEX = Regex("""var\s+quality\s*=\s*parseInt\s*\(\s*["'](\d+)["']\s*\)""")
+    }
+
     override val name = "Fullporner"
     override val mainUrl = "https://xiaoshenke.net"
     override val requiresReferer = true
@@ -34,7 +40,7 @@ class FullpornerExtractor : ExtractorApi() {
 
         // Extract the video ID from JavaScript: var id = "xxx"
         // The ID is stored reversed in the HTML and needs to be reversed back
-        val idMatch = Regex("""var\s+id\s*=\s*["']([^"']+)["']""").find(response)
+        val idMatch = VAR_ID_REGEX.find(response)
         val reversedId = idMatch?.groupValues?.get(1)?.reversed()
         if (reversedId == null) {
             Log.w("FullpornerExtractor", "Could not extract video ID from '$url'")
@@ -43,7 +49,7 @@ class FullpornerExtractor : ExtractorApi() {
 
         // Extract the quality bitmask from JavaScript: var quality = parseInt("N")
         // Bitmask: bit0=360p, bit1=480p, bit2=720p, bit3=1080p
-        val qualityMatch = Regex("""var\s+quality\s*=\s*parseInt\s*\(\s*["'](\d+)["']\s*\)""").find(response)
+        val qualityMatch = VAR_QUALITY_REGEX.find(response)
         val qualityBitmask = qualityMatch?.groupValues?.get(1)?.toIntOrNull()
         if (qualityBitmask == null) {
             Log.w("FullpornerExtractor", "Could not extract quality bitmask from '$url', defaulting to 720p")

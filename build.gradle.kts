@@ -126,6 +126,17 @@ subprojects {
                 tasks.named("compileDex") {
                     dependsOn("copyCommonLibClasses")
                 }
+                // Tasks that read from kotlin-classes/debug need explicit ordering
+                val copyTask = tasks.named("copyCommonLibClasses")
+                listOf(
+                    "bundleLibRuntimeToJarDebug",
+                    "bundleLibCompileToJarDebug",
+                    "processDebugJavaRes"
+                ).forEach { taskName ->
+                    tasks.matching { it.name == taskName }.configureEach {
+                        mustRunAfter(copyTask)
+                    }
+                }
             }
         }
     }

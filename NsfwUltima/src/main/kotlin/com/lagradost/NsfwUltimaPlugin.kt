@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
+import java.lang.ref.WeakReference
 
 /**
  * NSFW Ultima Plugin - Aggregates content from multiple NSFW plugins.
@@ -20,13 +21,18 @@ class NsfwUltimaPlugin : Plugin() {
         private const val TAG = "NsfwUltimaPlugin"
     }
 
-    var activity: AppCompatActivity? = null
+    /** Weak reference to avoid memory leaks when activity is destroyed */
+    private var activityRef: WeakReference<AppCompatActivity>? = null
+
+    /** Get activity if still valid, null otherwise */
+    val activity: AppCompatActivity?
+        get() = activityRef?.get()?.takeIf { !it.isFinishing && !it.isDestroyed }
 
     /** All registered homepage providers (one per FeedGroup) */
     val homepageProviders = mutableListOf<NsfwUltima>()
 
     override fun load(context: Context) {
-        activity = context as? AppCompatActivity
+        activityRef = (context as? AppCompatActivity)?.let { WeakReference(it) }
 
         // Load homepages (FeedGroups) from storage, sorted alphabetically
         val homepages = NsfwUltimaStorage.loadGroups().sortedBy { it.name.lowercase() }
