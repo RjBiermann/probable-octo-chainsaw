@@ -1,9 +1,9 @@
 package com.lagradost
 
+import com.lagradost.common.StringUtils.slugToLabel
 import com.lagradost.common.ValidationResult
 import java.net.URI
 import java.net.URISyntaxException
-import java.net.URLDecoder
 
 object MissAVUrlValidator {
     private const val DOMAIN = "missav.ws"
@@ -55,7 +55,7 @@ object MissAVUrlValidator {
         // Check /en/search/{keyword} (search doesn't use dm prefix)
         SEARCH_REGEX.find(path)?.let { match ->
             val keyword = match.groupValues[1]
-            val label = "Search: ${keyword.slugToLabel()}"
+            val label = "Search: ${keyword.slugToLabel(urlDecode = true)}"
             return ValidationResult.Valid("/en/search/$keyword", label)
         }
 
@@ -83,7 +83,7 @@ object MissAVUrlValidator {
         return if (parts.size >= 2) {
             formatLabelWithType(parts[0], parts[1])
         } else {
-            parts.last().slugToLabel()
+            parts.last().slugToLabel(urlDecode = true)
         }
     }
 
@@ -94,7 +94,7 @@ object MissAVUrlValidator {
         formatLabelWithType(type, name)
 
     private fun formatLabelWithType(type: String, name: String): String {
-        val decodedName = name.slugToLabel()
+        val decodedName = name.slugToLabel(urlDecode = true)
         return when (type) {
             "genres" -> "Genre: $decodedName"
             "actresses" -> decodedName
@@ -103,20 +103,5 @@ object MissAVUrlValidator {
             "tags" -> "Tag: $decodedName"
             else -> decodedName
         }
-    }
-
-    private fun String.slugToLabel(): String {
-        val decoded = try {
-            URLDecoder.decode(this, "UTF-8")
-        } catch (e: IllegalArgumentException) {
-            // Malformed percent-encoding, fall back to replacing %20 manually
-            this.replace("%20", " ")
-        }
-        return decoded
-            .replace("-", " ")
-            .split(" ")
-            .joinToString(" ") { word ->
-                word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-            }
     }
 }

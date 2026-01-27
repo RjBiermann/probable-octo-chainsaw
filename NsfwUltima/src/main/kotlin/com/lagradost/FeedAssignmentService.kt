@@ -152,4 +152,106 @@ object FeedAssignmentService {
     @Deprecated("Use clearHomepageAssignments instead", ReplaceWith("clearHomepageAssignments(allFeeds, groupId)"))
     fun clearGroupAssignments(allFeeds: List<FeedItem>, groupId: String) =
         clearHomepageAssignments(allFeeds, groupId)
+
+    // ========================================================================
+    // Complex operations (extracted from UI layer for testability)
+    // ========================================================================
+
+    /**
+     * Result of updating a homepage's feed selection.
+     *
+     * @property updatedFeeds All feeds after transformation (reflects complete state)
+     * @property feedsInHomepage Feeds selected for this homepage (created from AvailableFeed,
+     *           may not reflect full homepageIds if feed exists in other homepages - use
+     *           updatedFeeds for complete state)
+     */
+    data class HomepageUpdateResult(
+        val updatedFeeds: List<FeedItem>,
+        val feedsInHomepage: List<FeedItem>
+    )
+
+    /**
+     * Updates the complete feed list when a homepage's feed selection changes.
+     * This is a pure function with no side effects - ideal for testing.
+     *
+     * Logic:
+     * 1. If editing existing homepage: remove this homepage from all current feeds
+     * 2. Build homepage feeds from selected AvailableFeed objects
+     * 3. Merge selected feeds with existing feeds (add homepage to existing or create new)
+     * 4. Remove orphaned feeds (feeds with no homepage assignments)
+     *
+     * @param currentFeeds All feeds currently in the system
+     * @param selectedFeeds The feeds selected for this homepage
+     * @param homepageId The homepage being edited
+     * @param isExistingHomepage True if editing, false if creating new
+     * @return Updated feed list and the feeds specifically in this homepage
+     */
+    fun updateHomepageFeedSelection(
+        currentFeeds: List<FeedItem>,
+        selectedFeeds: List<AvailableFeed>,
+        homepageId: String,
+        isExistingHomepage: Boolean
+    ): HomepageUpdateResult {
+        // Use map for O(1) lookups instead of O(n) list scans
+        val feedsByKey = currentFeeds.associateBy { it.key() }.toMutableMap()
+
+        // Step 1: If editing existing, remove this homepage from all feeds
+        if (isExistingHomepage) {
+            feedsByKey.replaceAll { _, feed ->
+                if (feed.isInHomepage(homepageId)) {
+                    feed.copy(homepageIds = feed.homepageIds - homepageId)
+                } else {
+                    feed
+                }
+            }
+        }
+
+        // Step 2: Build homepage feeds from selection
+        val homepageFeeds = selectedFeeds.map { availableFeed ->
+            FeedItem(
+                pluginName = availableFeed.pluginName,
+                sectionName = availableFeed.sectionName,
+                sectionData = availableFeed.sectionData,
+                homepageIds = setOf(homepageId)
+            )
+        }
+
+        // Step 3: Merge selected feeds - O(m) instead of O(n*m)
+        homepageFeeds.forEach { homepageFeed ->
+            val key = homepageFeed.key()
+            val existing = feedsByKey[key]
+            if (existing != null) {
+                // Update existing feed to include this homepage
+                feedsByKey[key] = existing.copy(homepageIds = existing.homepageIds + homepageId)
+            } else {
+                // Add new feed
+                feedsByKey[key] = homepageFeed
+            }
+        }
+
+        // Step 4: Remove orphaned feeds (no homepage assignments)
+        val cleanedFeeds = feedsByKey.values.filter { it.homepageIds.isNotEmpty() }
+
+        return HomepageUpdateResult(
+            updatedFeeds = cleanedFeeds,
+            feedsInHomepage = homepageFeeds
+        )
+    }
+
+    /**
+     * Deletes a homepage and cleans up all feed assignments.
+     *
+     * @param currentFeeds All feeds in the system
+     * @param homepageId The homepage being deleted
+     * @return Updated feed list with orphaned feeds removed
+     */
+    fun deleteHomepageAndCleanup(
+        currentFeeds: List<FeedItem>,
+        homepageId: String
+    ): List<FeedItem> {
+        // Remove homepage from all feeds
+        val updatedFeeds = clearHomepageAssignments(currentFeeds, homepageId)
+        // Remove orphaned feeds
+        return updatedFeeds.filter { it.homepageIds.isNotEmpty() }
+    }
 }

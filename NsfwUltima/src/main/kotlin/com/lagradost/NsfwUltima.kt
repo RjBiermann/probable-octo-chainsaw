@@ -20,7 +20,7 @@ import kotlin.coroutines.cancellation.CancellationException
  */
 class NsfwUltima(
     val plugin: NsfwUltimaPlugin,
-    private val homepage: FeedGroup? = null
+    private val homepage: Homepage? = null
 ) : MainAPI() {
 
     // Name is derived from homepage, or "NSFW Ultima" for setup state

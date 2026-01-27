@@ -233,10 +233,21 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3.2.2
 
-      - name: Build Plugins
+      - name: Run Tests
         run: |
           cd "$GITHUB_WORKSPACE/src"
           chmod +x gradlew
+
+          # Run tests before building to catch regressions
+          if ! ./gradlew test --parallel --build-cache --no-daemon; then
+            echo "::error::Tests failed - aborting build"
+            exit 1
+          fi
+          echo "All tests passed"
+
+      - name: Build Plugins
+        run: |
+          cd "$GITHUB_WORKSPACE/src"
 
           # Run gradle build with explicit error check
           if ! ./gradlew make makePluginsJson --parallel --build-cache --no-daemon; then

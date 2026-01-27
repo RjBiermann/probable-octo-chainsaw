@@ -209,9 +209,11 @@ data class FeedItem(
 }
 
 /**
- * Represents a user-created group of feeds.
+ * Represents a user-created homepage (collection of feeds).
+ *
+ * Renamed from FeedGroup to match ubiquitous language in the UI.
  */
-data class FeedGroup(
+data class Homepage(
     val id: String,
     val name: String,
     val priority: Int = 0  // Reserved for future sorting (currently follows list order)
@@ -223,28 +225,32 @@ data class FeedGroup(
     }
 
     companion object {
-        fun fromJson(json: JSONObject): FeedGroup? = try {
-            FeedGroup(
+        fun fromJson(json: JSONObject): Homepage? = try {
+            Homepage(
                 id = json.getString("id"),
                 name = json.getString("name"),
                 priority = json.optInt("priority", 0)
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse FeedGroup from JSON: ${e.message}")
+            Log.e(TAG, "Failed to parse Homepage from JSON: ${e.message}")
             null
         }
 
         /**
-         * Create a new group with generated ID.
+         * Create a new homepage with generated ID.
          */
-        fun create(name: String): FeedGroup {
-            return FeedGroup(
+        fun create(name: String): Homepage {
+            return Homepage(
                 id = "group_${java.util.UUID.randomUUID().toString().take(8)}",
                 name = name.trim()
             )
         }
     }
 }
+
+/** Type alias for backward compatibility */
+@Deprecated("Use Homepage instead", ReplaceWith("Homepage"))
+typealias FeedGroup = Homepage
 
 /**
  * Represents an available feed from a discovered plugin (for the picker).

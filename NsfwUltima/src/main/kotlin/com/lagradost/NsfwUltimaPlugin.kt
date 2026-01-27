@@ -10,7 +10,7 @@ import java.lang.ref.WeakReference
 /**
  * NSFW Ultima Plugin - Aggregates content from multiple NSFW plugins.
  *
- * Each homepage (FeedGroup) is registered as a separate MainAPI provider.
+ * Each Homepage is registered as a separate MainAPI provider.
  * Users create homepages in settings, then assign feeds to them.
  * No default homepage - users must create at least one to see content.
  */
@@ -28,14 +28,14 @@ class NsfwUltimaPlugin : Plugin() {
     val activity: AppCompatActivity?
         get() = activityRef?.get()?.takeIf { !it.isFinishing && !it.isDestroyed }
 
-    /** All registered homepage providers (one per FeedGroup) */
+    /** All registered homepage providers (one per Homepage) */
     val homepageProviders = mutableListOf<NsfwUltima>()
 
     override fun load(context: Context) {
         activityRef = (context as? AppCompatActivity)?.let { WeakReference(it) }
 
-        // Load homepages (FeedGroups) from storage, sorted alphabetically
-        val homepages = NsfwUltimaStorage.loadGroups().sortedBy { it.name.lowercase() }
+        // Load homepages from storage, sorted alphabetically
+        val homepages = NsfwUltimaStorage.loadHomepages().sortedBy { it.name.lowercase() }
 
         if (homepages.isEmpty()) {
             // No homepages defined - register a setup provider

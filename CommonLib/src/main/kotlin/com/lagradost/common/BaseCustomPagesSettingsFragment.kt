@@ -6,6 +6,7 @@ import android.content.res.ColorStateList
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
@@ -30,12 +31,12 @@ import com.google.android.material.textfield.TextInputLayout
  * Base class for custom pages settings dialog fragments.
  * Provides all common UI and functionality for managing custom homepage sections.
  *
- * Subclasses only need to override the abstract members to provide:
+ * Subclasses need to override:
  * - Site-specific configuration (domain, examples, error messages)
  * - URL validation logic
- * - Storage operations
+ * - Repository for storage operations
  *
- * Example implementation:
+ * Example implementation using Repository pattern:
  * ```kotlin
  * class MyPluginSettingsFragment : BaseCustomPagesSettingsFragment() {
  *     override val siteDomain = "example.com"
@@ -43,9 +44,13 @@ import com.google.android.material.textfield.TextInputLayout
  *     override val invalidPathMessage = "Invalid URL (use category or tag pages)"
  *     override val logTag = "MyPluginSettings"
  *
+ *     override val repository = GlobalStorageCustomPagesRepository(
+ *         storageKey = MyPlugin.STORAGE_KEY,
+ *         legacyPrefsName = MyPlugin.LEGACY_PREFS_NAME,
+ *         tag = logTag
+ *     )
+ *
  *     override fun validateUrl(url: String) = MyUrlValidator.validate(url)
- *     override fun loadPages(): List<CustomPage> = ... // load from storage
- *     override fun savePages(pages: List<CustomPage>): Boolean = ... // save to storage
  * }
  * ```
  */
@@ -65,14 +70,36 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
     /** Tag used for logging */
     protected abstract val logTag: String
 
+    /** Repository for storage operations. Override this to use the Repository pattern. */
+    protected open val repository: CustomPagesRepository? = null
+
     /** Validate a URL and return the result */
     protected abstract fun validateUrl(url: String): ValidationResult
 
-    /** Load custom pages from storage */
-    protected abstract fun loadPages(): List<CustomPage>
+    /**
+     * Load custom pages from storage.
+     * Default implementation delegates to repository if provided.
+     * Override this if not using repository pattern.
+     */
+    protected open fun loadPages(): List<CustomPage> {
+        if (repository == null) {
+            Log.w(logTag, "loadPages: repository is null - override loadPages() or provide repository")
+        }
+        return repository?.load() ?: emptyList()
+    }
 
-    /** Save custom pages to storage. Returns true on success. */
-    protected abstract fun savePages(pages: List<CustomPage>): Boolean
+    /**
+     * Save custom pages to storage.
+     * Default implementation delegates to repository if provided.
+     * Override this if not using repository pattern.
+     * @return true on success, false on failure
+     */
+    protected open fun savePages(pages: List<CustomPage>): Boolean {
+        if (repository == null) {
+            Log.w(logTag, "savePages: repository is null - override savePages() or provide repository")
+        }
+        return repository?.save(pages) ?: false
+    }
 
     // ===== Instance state =====
 

@@ -3,10 +3,8 @@ package com.lagradost
 import com.lagradost.common.CloudstreamUI
 import com.lagradost.common.TvFocusUtils
 
-import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
-import android.content.res.ColorStateList
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
@@ -23,26 +21,37 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.card.MaterialCardView
 import com.lagradost.cloudstream3.APIHolder.allProviders
 import com.lagradost.cloudstream3.TvType
 
 /**
  * Settings fragment for NSFW Ultima with homepage-centric design.
  * Displays homepages alphabetically sorted with tap-to-edit functionality.
+ *
+ * Architecture: Uses repository pattern and use cases for clean separation:
+ * - HomepageRepository: Abstracts storage access
+ * - SaveHomepageUseCase/DeleteHomepageUseCase: Coordinate business logic
+ * - FeedAssignmentService: Pure domain logic for feed transformations
  */
 class NsfwUltimaSettingsFragment(
-    private val plugin: NsfwUltimaPlugin
+    private val plugin: NsfwUltimaPlugin,
+    private val repository: HomepageRepository = CloudstreamHomepageRepository()
 ) : DialogFragment() {
 
     companion object {
         private const val TAG = "NsfwUltimaSettings"
     }
 
+    // Use cases
+    private val saveHomepageUseCase = SaveHomepageUseCase(repository)
+    private val deleteHomepageUseCase = DeleteHomepageUseCase(repository)
+    private val loadDataUseCase = LoadHomepageDataUseCase(repository)
+    private val resetDataUseCase = ResetAllDataUseCase(repository)
+
+    // State
     private var feedList = mutableListOf<FeedItem>()
     private var settings = NsfwUltimaSettings()
-    private var feedGroups = mutableListOf<FeedGroup>()
+    private var homepages = mutableListOf<Homepage>()
 
     private lateinit var mainContainer: LinearLayout
     private lateinit var homepageAdapter: HomepageListAdapter
@@ -106,20 +115,12 @@ class NsfwUltimaSettingsFragment(
     }
 
     private fun loadData() {
-        settings = NsfwUltimaStorage.loadSettings()
+        val data = loadDataUseCase.execute()
+        settings = data.settings
+        feedList = data.feeds.toMutableList()
+        homepages = data.homepages.toMutableList()
 
-        // Load feeds (or migrate from old format)
-        feedList = NsfwUltimaStorage.loadFeedList().toMutableList()
-        if (feedList.isEmpty()) {
-            NsfwUltimaStorage.migrateFromPluginStates()?.let { migrated ->
-                feedList = migrated.toMutableList()
-            }
-        }
-
-        // Load homepages
-        feedGroups = NsfwUltimaStorage.loadGroups().toMutableList()
-
-        Log.d(TAG, "Loaded ${feedList.size} feeds, ${feedGroups.size} homepages")
+        Log.d(TAG, "Loaded ${feedList.size} feeds, ${homepages.size} homepages")
     }
 
     private fun createSettingsView(context: Context): View {
@@ -159,7 +160,7 @@ class NsfwUltimaSettingsFragment(
 
         // Empty state text
         emptyStateText = CloudstreamUI.createEmptyState(context, "No homepages yet.\nCreate one below to get started.", colors).apply {
-            visibility = if (feedGroups.isEmpty()) View.VISIBLE else View.GONE
+            visibility = if (homepages.isEmpty()) View.VISIBLE else View.GONE
         }
         mainContainer.addView(emptyStateText)
 
@@ -218,7 +219,7 @@ class NsfwUltimaSettingsFragment(
         ) { isChecked ->
             val originalSettings = settings
             settings = settings.copy(showPluginNames = isChecked)
-            if (!NsfwUltimaStorage.saveSettings(settings)) {
+            if (!repository.saveSettings(settings)) {
                 Log.e(TAG, "Failed to save settings")
                 settings = originalSettings  // Revert in-memory state
                 showSaveErrorToast()
@@ -271,7 +272,7 @@ class NsfwUltimaSettingsFragment(
             )
             layoutManager = LinearLayoutManager(context)
             isNestedScrollingEnabled = false
-            visibility = if (feedGroups.isEmpty()) View.GONE else View.VISIBLE
+            visibility = if (homepages.isEmpty()) View.GONE else View.VISIBLE
         }
 
         homepageAdapter = HomepageListAdapter(
@@ -291,12 +292,12 @@ class NsfwUltimaSettingsFragment(
         recyclerView.adapter = homepageAdapter
 
         // Display homepages sorted alphabetically
-        homepageAdapter.submitList(feedGroups.sortedBy { it.name.lowercase() })
+        homepageAdapter.submitList(homepages.sortedBy { it.name.lowercase() })
 
         return recyclerView
     }
 
-    private fun showHomepageEditor(existingHomepage: FeedGroup?) {
+    private fun showHomepageEditor(existingHomepage: Homepage?) {
         val availableFeeds = getAvailableFeeds()
 
         val dialog = HomepageEditorDialog(
@@ -305,40 +306,41 @@ class NsfwUltimaSettingsFragment(
             availableFeeds = availableFeeds,
             showPluginNames = settings.showPluginNames,
             onSave = onSave@{ group, _, allFeeds ->
+                // Fragment may detach while dialog is open
+                if (!isAdded) return@onSave
                 val isNew = existingHomepage == null
 
-                // Store original state for rollback
-                val originalGroups = feedGroups.toList()
-                val originalFeeds = feedList.toList()
+                // Dialog already computed the final feeds using FeedAssignmentService
+                // We just need to update local state and persist via repository
 
-                // Update homepages
+                // Update local state
                 if (isNew) {
-                    feedGroups.add(group)
+                    homepages.add(group)
                 } else {
-                    val index = feedGroups.indexOfFirst { it.id == group.id }
+                    val index = homepages.indexOfFirst { it.id == group.id }
                     if (index >= 0) {
-                        feedGroups[index] = group
+                        homepages[index] = group
                     }
                 }
-
-                // Update feeds
                 feedList.clear()
                 feedList.addAll(allFeeds)
 
-                // Save and rollback on failure
-                if (!saveData()) {
-                    feedGroups.clear()
-                    feedGroups.addAll(originalGroups)
-                    feedList.clear()
-                    feedList.addAll(originalFeeds)
+                // Persist via repository
+                val feedsSaved = repository.saveFeeds(feedList)
+                val groupsSaved = repository.saveHomepages(homepages)
+
+                if (!feedsSaved || !groupsSaved) {
+                    Log.e(TAG, "Failed to save: feeds=$feedsSaved, groups=$groupsSaved")
+                    // Reload to restore consistent state
+                    loadData()
                     showSaveErrorToast()
                     refreshUI()
                     return@onSave
                 }
 
                 refreshUI()
+                plugin.refreshAllHomepages()
 
-                // Show restart reminder only after confirmed save
                 context?.let { ctx ->
                     android.widget.Toast.makeText(
                         ctx,
@@ -354,38 +356,32 @@ class NsfwUltimaSettingsFragment(
         dialog.show(parentFragmentManager, "HomepageEditorDialog")
     }
 
-    private fun deleteHomepage(homepage: FeedGroup) {
-        // Store original state for rollback
-        val originalGroups = feedGroups.toList()
-        val originalFeeds = feedList.toList()
+    private fun deleteHomepage(homepage: Homepage) {
+        // Fragment may detach while dialog is open
+        if (!isAdded) return
+        // Use the delete use case for coordinated deletion
+        when (val result = deleteHomepageUseCase.execute(homepage.id, homepages, feedList)) {
+            is UseCaseResult.Success -> {
+                homepages.clear()
+                homepages.addAll(result.data.updatedHomepages)
+                feedList.clear()
+                feedList.addAll(result.data.updatedFeeds)
 
-        // Remove homepage
-        feedGroups.removeAll { it.id == homepage.id }
+                refreshUI()
+                plugin.refreshAllHomepages()
 
-        // Clear feed assignments for this homepage
-        feedList = FeedAssignmentService.clearHomepageAssignments(feedList, homepage.id).toMutableList()
-        // Remove orphaned feeds
-        feedList = feedList.filter { it.homepageIds.isNotEmpty() }.toMutableList()
-
-        // Save and rollback on failure
-        if (!saveData()) {
-            feedGroups.clear()
-            feedGroups.addAll(originalGroups)
-            feedList.clear()
-            feedList.addAll(originalFeeds)
-            showSaveErrorToast()
-            refreshUI()
-            return
-        }
-
-        refreshUI()
-
-        context?.let { ctx ->
-            android.widget.Toast.makeText(
-                ctx,
-                "Homepage deleted. Restart app to see changes.",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
+                context?.let { ctx ->
+                    android.widget.Toast.makeText(
+                        ctx,
+                        "Homepage deleted. Restart app to see changes.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            is UseCaseResult.Failure -> {
+                Log.e(TAG, "Delete failed: ${result.error}")
+                showSaveErrorToast()
+            }
         }
     }
 
@@ -414,7 +410,7 @@ class NsfwUltimaSettingsFragment(
 
     private fun refreshUI() {
         // Force content refresh because feed counts may have changed
-        homepageAdapter.submitList(feedGroups.sortedBy { it.name.lowercase() }, forceContentRefresh = true)
+        homepageAdapter.submitList(homepages.sortedBy { it.name.lowercase() }, forceContentRefresh = true)
         updateEmptyState()
         if (isTvMode) {
             TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, homepageRecyclerView)
@@ -422,22 +418,9 @@ class NsfwUltimaSettingsFragment(
     }
 
     private fun updateEmptyState() {
-        val isEmpty = feedGroups.isEmpty()
+        val isEmpty = homepages.isEmpty()
         emptyStateText.visibility = if (isEmpty) View.VISIBLE else View.GONE
         homepageRecyclerView.visibility = if (isEmpty) View.GONE else View.VISIBLE
-    }
-
-    private fun saveData(): Boolean {
-        val feedsSaved = NsfwUltimaStorage.saveFeedList(feedList)
-        val groupsSaved = NsfwUltimaStorage.saveGroups(feedGroups)
-
-        if (!feedsSaved || !groupsSaved) {
-            Log.e(TAG, "Failed to save: feeds=$feedsSaved, groups=$groupsSaved")
-            return false
-        }
-
-        plugin.refreshAllHomepages()
-        return true
     }
 
     private fun showSaveErrorToast() {
@@ -455,29 +438,33 @@ class NsfwUltimaSettingsFragment(
             .setTitle("Reset All Data")
             .setMessage("This will remove all your homepages, feeds, and settings. Are you sure?")
             .setPositiveButton("Reset") { _, _ ->
-                val success = NsfwUltimaStorage.clearAll()
-                if (success) {
-                    feedList.clear()
-                    feedGroups.clear()
-                    settings = NsfwUltimaSettings()
+                // Fragment may detach while dialog is open
+                if (!isAdded) return@setPositiveButton
+                when (val result = resetDataUseCase.execute()) {
+                    is UseCaseResult.Success -> {
+                        feedList.clear()
+                        homepages.clear()
+                        settings = NsfwUltimaSettings()
 
-                    homepageAdapter.submitList(emptyList())
-                    updateEmptyState()
-                    plugin.refreshAllHomepages()
+                        homepageAdapter.submitList(emptyList())
+                        updateEmptyState()
+                        plugin.refreshAllHomepages()
 
-                    Log.d(TAG, "All data reset")
-                    android.widget.Toast.makeText(
-                        context,
-                        "All data reset successfully",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                } else {
-                    Log.e(TAG, "Failed to reset all data")
-                    android.widget.Toast.makeText(
-                        context,
-                        "Failed to reset data. Please try again.",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
+                        Log.d(TAG, "All data reset")
+                        android.widget.Toast.makeText(
+                            context,
+                            "All data reset successfully",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    is UseCaseResult.Failure -> {
+                        Log.e(TAG, "Failed to reset all data: ${result.error}")
+                        android.widget.Toast.makeText(
+                            context,
+                            "Failed to reset data. Please try again.",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -493,148 +480,4 @@ class NsfwUltimaSettingsFragment(
             homepageRecyclerView.adapter = null
         }
     }
-}
-
-/**
- * Adapter for displaying homepages (sorted alphabetically).
- */
-class HomepageListAdapter(
-    private val context: Context,
-    private val isTvMode: Boolean,
-    private val textColor: Int,
-    private val grayTextColor: Int,
-    private val primaryColor: Int,
-    private val cardColor: Int,
-    private val onHomepageClick: (FeedGroup) -> Unit,
-    private val getFeedCount: (homepageId: String) -> Int
-) : RecyclerView.Adapter<HomepageListAdapter.HomepageViewHolder>() {
-
-    private val homepages = mutableListOf<FeedGroup>()
-
-    init {
-        setHasStableIds(true)
-    }
-
-    /**
-     * Submit a new list of homepages.
-     * @param forceContentRefresh If true, forces rebind of all items using notifyDataSetChanged().
-     *        Use this when feed counts (from external data source) may have changed.
-     */
-    @SuppressLint("NotifyDataSetChanged")
-    fun submitList(newHomepages: List<FeedGroup>, forceContentRefresh: Boolean = false) {
-        if (forceContentRefresh) {
-            // When external data (feed counts) changes, DiffUtil can't detect it because
-            // FeedGroup objects themselves haven't changed. Use notifyDataSetChanged() directly.
-            homepages.clear()
-            homepages.addAll(newHomepages)
-            notifyDataSetChanged()
-        } else {
-            val diffCallback = HomepageDiffCallback(homepages.toList(), newHomepages)
-            val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(diffCallback)
-            homepages.clear()
-            homepages.addAll(newHomepages)
-            diffResult.dispatchUpdatesTo(this)
-        }
-    }
-
-    override fun getItemCount(): Int = homepages.size
-
-    override fun getItemId(position: Int): Long = homepages[position].id.hashCode().toLong()
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): HomepageViewHolder {
-        val card = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = RecyclerView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                bottomMargin = dp(8)
-            }
-            setBackgroundColor(cardColor)
-            setPadding(dp(12), dp(14), dp(12), dp(14))
-            // Add ripple feedback
-            isClickable = true
-            val rippleAttr = android.R.attr.selectableItemBackground
-            val typedValue = android.util.TypedValue()
-            context.theme.resolveAttribute(rippleAttr, typedValue, true)
-            foreground = androidx.core.content.ContextCompat.getDrawable(context, typedValue.resourceId)
-        }
-
-        // Content container
-        val contentContainer = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        val nameText = TextView(context).apply {
-            textSize = 16f
-            setTextColor(textColor)
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }
-        contentContainer.addView(nameText)
-
-        val countText = TextView(context).apply {
-            textSize = 12f
-            setTextColor(grayTextColor)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(2) }
-        }
-        contentContainer.addView(countText)
-
-        card.addView(contentContainer)
-
-        // Arrow indicator
-        val arrowText = TextView(context).apply {
-            text = ">"
-            textSize = 18f
-            setTextColor(grayTextColor)
-            contentDescription = "Edit"
-        }
-        card.addView(arrowText)
-
-        if (isTvMode) {
-            TvFocusUtils.makeFocusable(card)
-        }
-
-        return HomepageViewHolder(card, nameText, countText)
-    }
-
-    override fun onBindViewHolder(holder: HomepageViewHolder, position: Int) {
-        val homepage = homepages[position]
-        val feedCount = getFeedCount(homepage.id)
-
-        holder.itemView.tag = homepage.id
-        holder.nameText.text = homepage.name
-        holder.countText.text = "$feedCount feeds"
-        holder.countText.setTextColor(if (feedCount > 0) primaryColor else grayTextColor)
-        holder.itemView.contentDescription = "${homepage.name}, $feedCount feeds. Tap to edit."
-
-        val card = holder.itemView as LinearLayout
-        card.setOnClickListener {
-            onHomepageClick(homepage)
-        }
-    }
-
-    private fun dp(dp: Int): Int = TvFocusUtils.dpToPx(context, dp)
-
-    private class HomepageDiffCallback(
-        private val oldList: List<FeedGroup>,
-        private val newList: List<FeedGroup>
-    ) : androidx.recyclerview.widget.DiffUtil.Callback() {
-        override fun getOldListSize() = oldList.size
-        override fun getNewListSize() = newList.size
-        override fun areItemsTheSame(oldPos: Int, newPos: Int) =
-            oldList[oldPos].id == newList[newPos].id
-        override fun areContentsTheSame(oldPos: Int, newPos: Int) =
-            oldList[oldPos] == newList[newPos]
-    }
-
-    class HomepageViewHolder(
-        itemView: View,
-        val nameText: TextView,
-        val countText: TextView
-    ) : RecyclerView.ViewHolder(itemView)
 }

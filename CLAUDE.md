@@ -143,12 +143,17 @@ override fun onStart() {
 Shared utilities live in `CommonLib/src/main/kotlin/com/lagradost/common/`:
 - `ValidationResult.kt` - Sealed class: Valid(path, label), InvalidDomain, InvalidPath
 - `CustomPage.kt` - Data class with JSON serialization (robust error handling)
+- `CustomPagesRepository.kt` - Repository pattern interface and implementations for custom pages storage
 - `CustomPagesAdapter.kt` - RecyclerView adapter for custom pages list
 - `CustomPageItemTouchHelper.kt` - Drag-and-drop support for touch mode
+- `BaseCustomPagesSettingsFragment.kt` - Abstract base class for plugin settings dialogs
 - `TvFocusUtils.kt` - Android TV detection and D-pad navigation helpers
 - `DialogUtils.kt` - Theme color resolution, TV/BottomSheet dialog factory, and `showDeleteConfirmation()` for delete actions
 - `CloudstreamUI.kt` - Cloudstream-themed UI component library (chips, buttons, cards, badges)
 - `CloudstreamUIExamples.kt` - Usage examples for CloudstreamUI components
+- `StringUtils.kt` - URL slug processing and text formatting utilities
+- `DurationUtils.kt` - Video duration parsing from various formats
+- `PaginationUtils.kt` - Pagination strategy utilities for MainAPI implementations
 
 ### CloudstreamUI Component Library
 
@@ -273,8 +278,8 @@ When copying vector drawables from Cloudstream, replace `?attr/white` with `@and
 
 Provided by root build.gradle.kts:
 - `cloudstream3:pre-release` - Core API stubs
-- `NiceHttp:0.4.13` - HTTP client (`app.get()`, `app.post()`)
-- `jsoup:1.18.3` - HTML parsing via CSS selectors
+- `NiceHttp:0.4.16` - HTTP client (`app.get()`, `app.post()`)
+- `jsoup:1.22.1` - HTML parsing via CSS selectors
 - `kotlinx-coroutines-core:1.10.1` - Async operations
 - `fuzzywuzzy:1.4.0` - String matching
 

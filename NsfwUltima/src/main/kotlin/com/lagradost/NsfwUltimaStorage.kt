@@ -146,36 +146,44 @@ object NsfwUltimaStorage {
     }
 
     /**
-     * Load user-created groups.
+     * Load user-created homepages.
      */
-    fun loadGroups(): List<FeedGroup> {
+    fun loadHomepages(): List<Homepage> {
         return try {
             val json = getKey<String>(KEY_GROUPS) ?: return emptyList()
             val array = JSONArray(json)
             (0 until array.length()).mapNotNull { i ->
-                FeedGroup.fromJson(array.getJSONObject(i))
+                Homepage.fromJson(array.getJSONObject(i))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load groups", e)
+            Log.e(TAG, "Failed to load homepages", e)
             emptyList()
         }
     }
 
+    /** @deprecated Use loadHomepages() instead */
+    @Deprecated("Use loadHomepages() instead", ReplaceWith("loadHomepages()"))
+    fun loadGroups(): List<Homepage> = loadHomepages()
+
     /**
-     * Save user-created groups.
+     * Save user-created homepages.
      */
-    fun saveGroups(groups: List<FeedGroup>): Boolean {
+    fun saveHomepages(homepages: List<Homepage>): Boolean {
         return try {
             val array = JSONArray().apply {
-                groups.forEach { put(it.toJson()) }
+                homepages.forEach { put(it.toJson()) }
             }
             setKey(KEY_GROUPS, array.toString())
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save groups", e)
+            Log.e(TAG, "Failed to save homepages", e)
             false
         }
     }
+
+    /** @deprecated Use saveHomepages() instead */
+    @Deprecated("Use saveHomepages() instead", ReplaceWith("saveHomepages(groups)"))
+    fun saveGroups(groups: List<Homepage>): Boolean = saveHomepages(groups)
 
     /**
      * Clear all stored data.

@@ -1,5 +1,6 @@
 package com.lagradost
 
+import com.lagradost.common.StringUtils.slugToLabel
 import com.lagradost.common.ValidationResult
 import java.net.URI
 import java.net.URISyntaxException
@@ -34,25 +35,25 @@ object PornHitsUrlValidator {
 
         // Check for category (ct parameter)
         params["ct"]?.let { category ->
-            val label = category.slugToLabel()
+            val label = category.slugToLabel(urlDecode = true)
             return ValidationResult.Valid("/videos.php?s=l&ct=$category", "Category: $label")
         }
 
         // Check for pornstar (ps parameter)
         params["ps"]?.let { pornstar ->
-            val label = pornstar.slugToLabel()
+            val label = pornstar.slugToLabel(urlDecode = true)
             return ValidationResult.Valid("/videos.php?s=l&ps=$pornstar", "Pornstar: $label")
         }
 
         // Check for sponsor/site (spon parameter)
         params["spon"]?.let { sponsor ->
-            val label = sponsor.slugToLabel()
+            val label = sponsor.slugToLabel(urlDecode = true)
             return ValidationResult.Valid("/videos.php?s=l&spon=$sponsor", "Site: $label")
         }
 
         // Check for network (csg parameter)
         params["csg"]?.let { network ->
-            val label = network.slugToLabel()
+            val label = network.slugToLabel(urlDecode = true)
             return ValidationResult.Valid("/videos.php?s=l&csg=$network", "Network: $label")
         }
 
@@ -92,19 +93,5 @@ object PornHitsUrlValidator {
                 if (parts.size == 2) parts[0] to parts[1] else null
             }
             .toMap()
-    }
-
-    private fun String.slugToLabel(): String {
-        return try {
-            URLDecoder.decode(this, "UTF-8")
-        } catch (e: IllegalArgumentException) {
-            this
-        }
-            .replace("-", " ")
-            .replace("_", " ")
-            .split(" ")
-            .joinToString(" ") { word ->
-                word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-            }
     }
 }

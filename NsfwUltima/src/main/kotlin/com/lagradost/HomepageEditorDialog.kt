@@ -4,7 +4,6 @@ import com.lagradost.common.CloudstreamUI
 import com.lagradost.common.DialogUtils
 import com.lagradost.common.TvFocusUtils
 
-import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
 import android.content.res.ColorStateList
@@ -13,19 +12,14 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.widget.NestedScrollView
 import androidx.fragment.app.DialogFragment
-import androidx.recyclerview.widget.ItemTouchHelper
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.Chip
-import com.google.android.material.chip.ChipGroup
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 
@@ -35,12 +29,12 @@ import com.google.android.material.textfield.TextInputLayout
  * For creating new homepages, pass existingGroup = null.
  */
 class HomepageEditorDialog(
-    private val existingGroup: FeedGroup?,
+    private val existingGroup: Homepage?,
     private val currentFeeds: List<FeedItem>,
     private val availableFeeds: List<AvailableFeed>,
     private val showPluginNames: Boolean,
-    private val onSave: (group: FeedGroup, feedsInHomepage: List<FeedItem>, allFeeds: List<FeedItem>) -> Unit,
-    private val onDelete: ((FeedGroup) -> Unit)? = null
+    private val onSave: (group: Homepage, feedsInHomepage: List<FeedItem>, allFeeds: List<FeedItem>) -> Unit,
+    private val onDelete: ((Homepage) -> Unit)? = null
 ) : DialogFragment() {
 
     private val isTvMode by lazy { TvFocusUtils.isTvMode(requireContext()) }
@@ -396,393 +390,35 @@ class HomepageEditorDialog(
         val finalName = when {
             !name.isNullOrBlank() -> name
             existingGroup != null -> existingGroup.name
-            else -> return  // New homepage with no name - discard
+            else -> {
+                // New homepage with no name - show feedback and discard
+                context?.let {
+                    android.widget.Toast.makeText(
+                        it,
+                        "Homepage not saved - name required",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+                return
+            }
         }
 
         val group = if (existingGroup != null) {
             existingGroup.copy(name = finalName)
         } else {
-            FeedGroup(id = workingGroupId, name = finalName)
+            Homepage(id = workingGroupId, name = finalName)
         }
 
-        // Build FeedItem list for this homepage
-        val homepageFeeds = selectedFeeds.map { availableFeed ->
-            FeedItem(
-                pluginName = availableFeed.pluginName,
-                sectionName = availableFeed.sectionName,
-                sectionData = availableFeed.sectionData,
-                homepageIds = setOf(workingGroupId)
-            )
-        }
-
-        // Build the updated all-feeds list
-        val allFeedsUpdated = currentFeeds.toMutableList()
-
-        // Remove this homepage from all current feeds
-        if (existingGroup != null) {
-            allFeedsUpdated.replaceAll { feed ->
-                if (feed.isInHomepage(workingGroupId)) {
-                    feed.copy(homepageIds = feed.homepageIds - workingGroupId)
-                } else {
-                    feed
-                }
-            }
-        }
-
-        // Add selected feeds
-        val existingKeys = allFeedsUpdated.map { it.key() }.toSet()
-        homepageFeeds.forEach { homepageFeed ->
-            if (homepageFeed.key() in existingKeys) {
-                allFeedsUpdated.replaceAll { feed ->
-                    if (feed.key() == homepageFeed.key()) {
-                        feed.copy(homepageIds = feed.homepageIds + workingGroupId)
-                    } else {
-                        feed
-                    }
-                }
-            } else {
-                allFeedsUpdated.add(homepageFeed.copy(homepageIds = setOf(workingGroupId)))
-            }
-        }
-
-        // Remove orphaned feeds
-        val cleanedFeeds = allFeedsUpdated.filter { it.homepageIds.isNotEmpty() }
-
-        onSave(group, homepageFeeds, cleanedFeeds)
-    }
-
-    private fun dp(dp: Int): Int = TvFocusUtils.dpToPx(requireContext(), dp)
-}
-
-/**
- * Simple dialog for reordering selected feeds.
- * Touch mode: drag ≡ handle to reorder
- * TV mode: tap to select, tap destination to move
- * Changes are saved automatically on dismiss.
- */
-class ReorderFeedsDialog(
-    private val feeds: List<AvailableFeed>,
-    private val showPluginNames: Boolean,
-    private val onReorder: (List<AvailableFeed>) -> Unit
-) : DialogFragment() {
-
-    private val isTvMode by lazy { TvFocusUtils.isTvMode(requireContext()) }
-    private lateinit var colors: CloudstreamUI.UIColors
-    private lateinit var adapter: ReorderAdapter
-    private lateinit var recyclerView: RecyclerView
-    private lateinit var mainContainer: LinearLayout
-    private lateinit var subtitle: TextView
-    private var itemTouchHelper: ItemTouchHelper? = null
-
-    // Working copy
-    private val workingFeeds = feeds.toMutableList()
-
-    // Selection state (TV mode)
-    private var selectedPosition = -1
-
-    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
-        val context = requireContext()
-        colors = CloudstreamUI.UIColors.fromContext(context)
-
-        val contentView = createDialogView(context)
-        return DialogUtils.createTvOrBottomSheetDialog(context, isTvMode, theme, contentView, 0.9)
-    }
-
-    override fun onStart() {
-        super.onStart()
-        if (isTvMode) {
-            dialog?.window?.decorView?.post {
-                if (isAdded && ::recyclerView.isInitialized && recyclerView.isAttachedToWindow) {
-                    // Focus first RV item directly
-                    recyclerView.post {
-                        if (!isAdded || !recyclerView.isAttachedToWindow) return@post
-                        recyclerView.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
-                    }
-                }
-            }
-        }
-    }
-
-    override fun onDismiss(dialog: android.content.DialogInterface) {
-        if (isAdded) {
-            onReorder(workingFeeds.toList())
-        }
-        super.onDismiss(dialog)
-    }
-
-    private fun createDialogView(context: Context): View {
-        mainContainer = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(24), dp(24), dp(24))
-            setBackgroundColor(colors.background)
-        }
-
-        // Title
-        mainContainer.addView(CloudstreamUI.createHeaderText(context, "Reorder Feeds", colors).apply {
-            setPadding(0, 0, 0, dp(4))
-        })
-
-        // Subtitle
-        val subtitleText = if (isTvMode) "Tap to select, tap destination to move" else "Drag ≡ to reorder"
-        subtitle = CloudstreamUI.createCaptionText(context, subtitleText, colors).apply {
-            textSize = 13f
-            setPadding(0, 0, 0, dp(12))
-        }
-        mainContainer.addView(subtitle)
-
-        // RecyclerView
-        adapter = ReorderAdapter(
-            context = context,
-            isTvMode = isTvMode,
-            colors = colors,
-            showPluginNames = showPluginNames,
-            onStartDrag = { holder -> itemTouchHelper?.startDrag(holder) },
-            onTap = { position -> onItemTapped(position) }
+        // Delegate feed transformation to domain service
+        val result = FeedAssignmentService.updateHomepageFeedSelection(
+            currentFeeds = currentFeeds,
+            selectedFeeds = selectedFeeds,
+            homepageId = workingGroupId,
+            isExistingHomepage = existingGroup != null
         )
-        adapter.submitList(workingFeeds)
 
-        recyclerView = RecyclerView(context).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            layoutManager = LinearLayoutManager(context)
-            adapter = this@ReorderFeedsDialog.adapter
-            isNestedScrollingEnabled = false
-        }
-
-        // Touch helper for drag (non-TV)
-        if (!isTvMode) {
-            val touchHelper = object : ItemTouchHelper.Callback() {
-                override fun isLongPressDragEnabled() = false
-                override fun isItemViewSwipeEnabled() = false
-                override fun getMovementFlags(rv: RecyclerView, vh: RecyclerView.ViewHolder) =
-                    makeMovementFlags(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0)
-
-                override fun onMove(rv: RecyclerView, from: RecyclerView.ViewHolder, to: RecyclerView.ViewHolder): Boolean {
-                    val fromPos = from.bindingAdapterPosition
-                    val toPos = to.bindingAdapterPosition
-                    if (fromPos != RecyclerView.NO_POSITION && toPos != RecyclerView.NO_POSITION) {
-                        val item = workingFeeds.removeAt(fromPos)
-                        workingFeeds.add(toPos, item)
-                        adapter.notifyItemMoved(fromPos, toPos)
-                    }
-                    return true
-                }
-
-                override fun onSwiped(vh: RecyclerView.ViewHolder, dir: Int) {}
-            }
-            itemTouchHelper = ItemTouchHelper(touchHelper)
-            itemTouchHelper?.attachToRecyclerView(recyclerView)
-        }
-
-        mainContainer.addView(recyclerView)
-
-        return mainContainer
-    }
-
-    private fun onItemTapped(position: Int) {
-        if (!isTvMode) return
-
-        if (selectedPosition < 0) {
-            // First tap - select item
-            selectedPosition = position
-            subtitle.text = "Tap destination to move"
-            adapter.setSelectedPosition(position)
-        } else if (selectedPosition == position) {
-            // Tap same item - deselect
-            selectedPosition = -1
-            subtitle.text = "Tap to select, tap destination to move"
-            adapter.setSelectedPosition(-1)
-        } else {
-            // Tap different item - move selected to this position
-            val item = workingFeeds.removeAt(selectedPosition)
-            workingFeeds.add(position, item)
-            adapter.submitList(workingFeeds)
-
-            selectedPosition = -1
-            subtitle.text = "Tap to select, tap destination to move"
-            adapter.setSelectedPosition(-1)
-
-            // Restore focus to moved item's new position
-            restoreFocusToPosition(position)
-        }
-    }
-
-    private fun restoreFocusToPosition(position: Int) {
-        recyclerView.post {
-            if (!isAdded || !recyclerView.isAttachedToWindow) return@post
-            recyclerView.findViewHolderForAdapterPosition(position)?.itemView?.requestFocus()
-        }
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        itemTouchHelper?.attachToRecyclerView(null)
-        itemTouchHelper = null
-        if (::recyclerView.isInitialized) {
-            recyclerView.adapter = null
-        }
+        onSave(group, result.feedsInHomepage, result.updatedFeeds)
     }
 
     private fun dp(dp: Int): Int = TvFocusUtils.dpToPx(requireContext(), dp)
-}
-
-/**
- * Adapter for reorder dialog.
- */
-class ReorderAdapter(
-    private val context: Context,
-    private val isTvMode: Boolean,
-    private val colors: CloudstreamUI.UIColors,
-    private val showPluginNames: Boolean,
-    private val onStartDrag: (RecyclerView.ViewHolder) -> Unit,
-    private val onTap: (Int) -> Unit
-) : RecyclerView.Adapter<ReorderAdapter.ViewHolder>() {
-
-    private val items = mutableListOf<AvailableFeed>()
-    private var selectedPos = -1
-
-    @SuppressLint("NotifyDataSetChanged")
-    fun submitList(newItems: List<AvailableFeed>) {
-        items.clear()
-        items.addAll(newItems)
-        notifyDataSetChanged()
-    }
-
-    fun setSelectedPosition(position: Int) {
-        val oldPos = selectedPos
-        selectedPos = position
-        // Only update the specific items that changed, preserving focus
-        if (oldPos >= 0 && oldPos < items.size) {
-            notifyItemChanged(oldPos, PAYLOAD_SELECTION)
-        }
-        if (position >= 0 && position < items.size) {
-            notifyItemChanged(position, PAYLOAD_SELECTION)
-        }
-    }
-
-    companion object {
-        private const val PAYLOAD_SELECTION = "selection"
-    }
-
-    override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
-        if (payloads.contains(PAYLOAD_SELECTION)) {
-            // Partial update - only update selection visuals, preserving focus
-            val isSelected = position == selectedPos
-            val row = holder.itemView as LinearLayout
-            if (isSelected) {
-                row.setBackgroundColor((colors.primary and 0x00FFFFFF) or 0x30000000)
-                holder.nameText.setTextColor(colors.primary)
-            } else {
-                row.setBackgroundColor(0)
-                holder.nameText.setTextColor(colors.text)
-            }
-        } else {
-            // Full bind
-            super.onBindViewHolder(holder, position, payloads)
-        }
-    }
-
-    override fun getItemCount() = items.size
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val row = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = RecyclerView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(6) }
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-        }
-
-        // Drag handle (touch mode only)
-        val dragHandle: TextView? = if (!isTvMode) {
-            TextView(context).apply {
-                text = "≡"
-                textSize = 20f
-                setTextColor(colors.textGray)
-                contentDescription = "Drag to reorder"
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = dp(12) }
-            }.also { row.addView(it) }
-        } else null
-
-        val numberText = TextView(context).apply {
-            textSize = 14f
-            setTextColor(colors.textGray)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { marginEnd = dp(8) }
-        }
-        row.addView(numberText)
-
-        val nameText = TextView(context).apply {
-            textSize = 14f
-            setTextColor(colors.text)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        row.addView(nameText)
-
-        return ViewHolder(row, dragHandle, numberText, nameText)
-    }
-
-    @SuppressLint("ClickableViewAccessibility")
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val feed = items[position]
-        val isSelected = position == selectedPos
-
-        holder.numberText.text = "${position + 1}."
-        holder.nameText.text = if (showPluginNames) {
-            "[${feed.pluginName}] ${feed.sectionName}"
-        } else {
-            feed.sectionName
-        }
-
-        val row = holder.itemView as LinearLayout
-
-        // Visual selection state
-        if (isSelected) {
-            row.setBackgroundColor((colors.primary and 0x00FFFFFF) or 0x30000000)
-            holder.nameText.setTextColor(colors.primary)
-        } else {
-            row.setBackgroundColor(0)
-            holder.nameText.setTextColor(colors.text)
-        }
-
-        // Interaction setup
-        if (isTvMode) {
-            // TV: tap to select/move
-            row.isClickable = true
-            row.isFocusable = true
-            TvFocusUtils.makeFocusable(row, 8)
-            row.setOnClickListener {
-                val pos = holder.bindingAdapterPosition
-                if (pos != RecyclerView.NO_POSITION) onTap(pos)
-            }
-        } else {
-            // Touch: drag handle only
-            holder.dragHandle?.setOnTouchListener { _, event ->
-                if (event.action == MotionEvent.ACTION_DOWN) {
-                    onStartDrag(holder)
-                }
-                false
-            }
-            row.isFocusable = false
-            row.isClickable = false
-        }
-    }
-
-    private fun dp(dp: Int) = TvFocusUtils.dpToPx(context, dp)
-
-    class ViewHolder(
-        itemView: View,
-        val dragHandle: TextView?,
-        val numberText: TextView,
-        val nameText: TextView
-    ) : RecyclerView.ViewHolder(itemView)
 }

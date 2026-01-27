@@ -1,5 +1,6 @@
 package com.lagradost
 
+import com.lagradost.common.StringUtils.slugToLabel
 import com.lagradost.common.ValidationResult
 import java.net.URI
 
@@ -63,28 +64,28 @@ object PornTrexUrlValidator {
         // Try category pattern
         CATEGORY_REGEX.find(cleanPath)?.let { match ->
             val slug = match.groupValues[1]
-            val label = formatLabel(slug)
+            val label = slug.slugToLabel()
             return ValidationResult.Valid("/categories/$slug/", "Category: $label")
         }
 
         // Try tag pattern
         TAG_REGEX.find(cleanPath)?.let { match ->
             val slug = match.groupValues[1]
-            val label = formatLabel(slug)
+            val label = slug.slugToLabel()
             return ValidationResult.Valid("/tags/$slug/", "Tag: $label")
         }
 
         // Try model pattern
         MODEL_REGEX.find(cleanPath)?.let { match ->
             val slug = match.groupValues[1]
-            val label = formatLabel(slug)
+            val label = slug.slugToLabel()
             return ValidationResult.Valid("/models/$slug/", "Model: $label")
         }
 
         // Try channel pattern
         CHANNEL_REGEX.find(cleanPath)?.let { match ->
             val slug = match.groupValues[1]
-            val label = formatLabel(slug)
+            val label = slug.slugToLabel()
             return ValidationResult.Valid("/channels/$slug/", "Channel: $label")
         }
 
@@ -128,17 +129,4 @@ object PornTrexUrlValidator {
         return result
     }
 
-    /**
-     * Format a URL slug into a human-readable label.
-     * Converts "big-tits" to "Big Tits", "amateur" to "Amateur", etc.
-     */
-    private fun formatLabel(slug: String): String {
-        return slug
-            .replace("-", " ")
-            .replace("_", " ")
-            .split(" ")
-            .joinToString(" ") { word ->
-                word.replaceFirstChar { it.uppercase() }
-            }
-    }
 }
