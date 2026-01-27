@@ -268,18 +268,9 @@ class HomepageEditorDialog(
 
         feedsContainer.removeAllViews()
 
-        // Get feeds already assigned to OTHER homepages (can't be selected here)
-        val assignedToOtherHomepages = currentFeeds
-            .filter { feed ->
-                val otherHomepageIds = feed.homepageIds - workingGroupId
-                otherHomepageIds.isNotEmpty()
-            }
-            .map { it.key() }
-            .toSet()
-
-        // Filter available feeds
+        // Filter available feeds by search query only
+        // (same feed CAN be added to multiple homepages)
         val filteredFeeds = availableFeeds
-            .filter { it.key() !in assignedToOtherHomepages }
             .filter {
                 filterQuery.isEmpty() ||
                 it.sectionName.lowercase().contains(filterQuery) ||

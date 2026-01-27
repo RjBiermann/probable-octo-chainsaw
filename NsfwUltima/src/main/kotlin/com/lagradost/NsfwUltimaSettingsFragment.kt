@@ -413,7 +413,8 @@ class NsfwUltimaSettingsFragment(
     }
 
     private fun refreshUI() {
-        homepageAdapter.submitList(feedGroups.sortedBy { it.name.lowercase() })
+        // Force content refresh because feed counts may have changed
+        homepageAdapter.submitList(feedGroups.sortedBy { it.name.lowercase() }, forceContentRefresh = true)
         updateEmptyState()
         if (isTvMode) {
             TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, homepageRecyclerView)
@@ -514,12 +515,26 @@ class HomepageListAdapter(
         setHasStableIds(true)
     }
 
-    fun submitList(newHomepages: List<FeedGroup>) {
-        val diffCallback = HomepageDiffCallback(homepages.toList(), newHomepages)
-        val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(diffCallback)
-        homepages.clear()
-        homepages.addAll(newHomepages)
-        diffResult.dispatchUpdatesTo(this)
+    /**
+     * Submit a new list of homepages.
+     * @param forceContentRefresh If true, forces rebind of all items using notifyDataSetChanged().
+     *        Use this when feed counts (from external data source) may have changed.
+     */
+    @SuppressLint("NotifyDataSetChanged")
+    fun submitList(newHomepages: List<FeedGroup>, forceContentRefresh: Boolean = false) {
+        if (forceContentRefresh) {
+            // When external data (feed counts) changes, DiffUtil can't detect it because
+            // FeedGroup objects themselves haven't changed. Use notifyDataSetChanged() directly.
+            homepages.clear()
+            homepages.addAll(newHomepages)
+            notifyDataSetChanged()
+        } else {
+            val diffCallback = HomepageDiffCallback(homepages.toList(), newHomepages)
+            val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(diffCallback)
+            homepages.clear()
+            homepages.addAll(newHomepages)
+            diffResult.dispatchUpdatesTo(this)
+        }
     }
 
     override fun getItemCount(): Int = homepages.size
