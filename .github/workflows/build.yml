@@ -45,55 +45,48 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
           AFTER_SHA: ${{ github.event.after }}
         run: |
-          # Use push event refs for accurate diff (handles queued builds correctly)
+          bump_all=false
+          changed_files=""
+
+          # Determine changed files from push event
           if [[ "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]]; then
-            # New branch - compare against parent
-            changed_files=$(git diff --name-only HEAD~1 HEAD) || {
-              echo "::error::Failed to get changed files for new branch"
-              exit 1
-            }
+            changed_files=$(git diff --name-only HEAD~1 HEAD 2>/dev/null) || bump_all=true
           else
-            changed_files=$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA") || {
-              echo "::error::Failed to get changed files between $BEFORE_SHA and $AFTER_SHA"
-              exit 1
+            changed_files=$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA" 2>/dev/null) || {
+              echo "::warning::Cannot diff $BEFORE_SHA..$AFTER_SHA (force-push?), bumping all plugins"
+              bump_all=true
             }
           fi
+
+          # Bump all if CommonLib changed
+          if [[ "$bump_all" != "true" ]] && echo "$changed_files" | grep -q "^CommonLib/"; then
+            echo "::notice::CommonLib changed - bumping all plugins"
+            bump_all=true
+          fi
+
           echo "Changed files:"
           echo "$changed_files"
 
-          # Check if CommonLib was modified
-          commonlib_changed=false
-          if echo "$changed_files" | grep -q "^CommonLib/"; then
-            commonlib_changed=true
-            echo "::notice::CommonLib changed - will bump ALL plugins"
-          fi
-
-          # Find all plugin directories (directories with build.gradle.kts, excluding root and CommonLib)
+          # Discover plugins
           plugins=()
           for dir in */; do
             dir_name="${dir%/}"
-            if [[ -f "$dir_name/build.gradle.kts" && "$dir_name" != "CommonLib" ]]; then
-              plugins+=("$dir_name")
-            fi
+            [[ -f "$dir_name/build.gradle.kts" && "$dir_name" != "CommonLib" ]] && plugins+=("$dir_name")
           done
 
           if [[ ${#plugins[@]} -eq 0 ]]; then
-            echo "::error::No plugins found in repository. Expected directories with build.gradle.kts files."
+            echo "::error::No plugins found"
             exit 1
           fi
           echo "Found ${#plugins[@]} plugins: ${plugins[*]}"
 
-          # Determine which plugins to bump
+          # Select plugins to bump
           plugins_to_bump=()
-          if [[ "$commonlib_changed" == "true" ]]; then
-            # Bump all plugins if CommonLib changed
+          if [[ "$bump_all" == "true" ]]; then
             plugins_to_bump=("${plugins[@]}")
           else
-            # Only bump plugins that had changes
             for plugin in "${plugins[@]}"; do
-              if echo "$changed_files" | grep -q "^$plugin/"; then
-                plugins_to_bump+=("$plugin")
-              fi
+              echo "$changed_files" | grep -q "^$plugin/" && plugins_to_bump+=("$plugin")
             done
           fi
 
@@ -106,57 +99,29 @@ jobs:
           echo "Plugins to bump: ${plugins_to_bump[*]}"
           bumped_list=""
 
-          # Bump each plugin
           for plugin in "${plugins_to_bump[@]}"; do
             gradle_file="$plugin/build.gradle.kts"
 
-            # Get the version from BEFORE the push
-            # Use BEFORE_SHA for accuracy, fall back to HEAD~1 for new branches
-            if [[ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
-              git_output=$(git show "$BEFORE_SHA":"$gradle_file" 2>&1)
-              git_exit_code=$?
-            else
-              git_output=$(git show HEAD~1:"$gradle_file" 2>&1)
-              git_exit_code=$?
-            fi
+            # Read current version from working tree
+            current_version=$(grep -E "^version[[:space:]]*=" "$gradle_file" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' "'"'" | head -1)
 
-            if [[ $git_exit_code -ne 0 ]]; then
-              if echo "$git_output" | grep -q "does not exist\|path .* does not exist"; then
-                # New plugin - file didn't exist before this push
-                echo "::notice::$plugin is a new plugin, starting at version 1"
-                old_version=0
-              else
-                # Unexpected git error - fail loudly
-                echo "::error::Git error for $plugin: $git_output"
-                exit 1
-              fi
-            else
-              # Strip quotes and whitespace, handle formats: version = 3, version=3, version = "3"
-              old_version=$(echo "$git_output" | grep -E "^version[[:space:]]*=" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' "'"'" | head -1)
-
-              # Validate numeric - fail if unparseable for existing files
-              if ! [[ "$old_version" =~ ^[0-9]+$ ]]; then
-                echo "::error::Could not parse version for $plugin (got '$old_version'). Check build.gradle.kts format."
-                exit 1
-              fi
-            fi
-
-            new_version=$((old_version + 1))
-
-            # Update the version in the file
-            if ! sed -i -E "s/^version[[:space:]]*=.*/version = $new_version/" "$gradle_file"; then
-              echo "::error::sed failed to update version in $gradle_file"
+            if ! [[ "$current_version" =~ ^[0-9]+$ ]]; then
+              echo "::error::Cannot parse version for $plugin (got '$current_version')"
               exit 1
             fi
 
-            # Verify the update succeeded
-            actual_version=$(grep -E "^version[[:space:]]*=" "$gradle_file" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' ' | head -1)
-            if [[ "$actual_version" != "$new_version" ]]; then
-              echo "::error::Failed to update version in $gradle_file (expected $new_version, got '$actual_version')"
+            new_version=$((current_version + 1))
+
+            sed -i -E "s/^version[[:space:]]*=.*/version = $new_version/" "$gradle_file"
+
+            # Verify
+            actual=$(grep -E "^version[[:space:]]*=" "$gradle_file" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' ' | head -1)
+            if [[ "$actual" != "$new_version" ]]; then
+              echo "::error::Version update failed for $plugin (expected $new_version, got '$actual')"
               exit 1
             fi
 
-            echo "  $plugin: $old_version -> $new_version"
+            echo "  $plugin: $current_version -> $new_version"
             bumped_list="$bumped_list $plugin"
           done
 

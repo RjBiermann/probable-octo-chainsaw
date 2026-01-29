@@ -2,11 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Cloudstream App Reference
+
+Before implementing features or investigating APIs, **always read** the Cloudstream app's CLAUDE.md at `../cloudstream/CLAUDE.md` for up-to-date guidance on core APIs, data structures, and patterns.
+
+## Playwright Usage
+
+**Always use Playwright** to verify site behavior, test selectors, and debug scraping logic. Use **headless mode** by default. Only switch to headed mode when there is a visual issue that needs manual inspection.
+
 ## Project Overview
 
 Cloudstream3 plugin repository containing NSFW video streaming plugins. Each top-level directory with a `build.gradle.kts` is a separate Android library plugin that compiles to a `.cs3` file.
 
-Current plugins: Fullporner, HQPorner, MissAV, Neporn, NsfwUltima, Perverzija, PornHits, PornTrex, PornXp
+Current plugins: FreePornVideos, Fullporner, HQPorner, JavGuru, MissAV, Neporn, NsfwUltima, Perverzija, Porn36, PornHits, PornTrex, PornXp, SevenMmTv
 
 **License:** Public domain - use however you want with no conditions.
 
@@ -14,12 +22,13 @@ Current plugins: Fullporner, HQPorner, MissAV, Neporn, NsfwUltima, Perverzija, P
 
 ## AI Policy
 
-When using AI assistance for contributions to this repository:
+AI is a great tool. However, we want you to follow these rules regarding usage of AI in order to ensure the quality of both code and discussions.
 
-1. **Disclose AI usage** - Always state any AI usage in pull requests and issues
-2. **Test before submitting** - Always test code before making a pull request. We do not want to test your AI generated code
-3. **Humans over AI** - Listen to humans over computers. Contributors to CloudStream know this codebase better than an AI
-4. **Understand your code** - You should be able to explain and fix any code you submit. We do in-depth reviews and will reject low effort contributions
+1. Always test code before making a pull request. We do not want to test your AI generated code.
+
+2. Listen to humans over computers. Contributors to CloudStream know this codebase better than an AI.
+
+3. You should be able to explain and fix any code you submit. We do in-depth reviews and will reject low effort contributions.
 
 ## Build Commands
 
