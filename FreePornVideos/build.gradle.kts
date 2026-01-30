@@ -1,4 +1,4 @@
-version = 1
+version = 2
 
 cloudstream {
     description = "FreePornVideos - Full Length Porn Videos in Ultra HD"
