@@ -102,8 +102,8 @@ subprojects {
         implementation("me.xdrop:fuzzywuzzy:1.4.0")
 
         // Lifecycle dependencies for ViewModel support (lightweight, no Compose needed)
-        implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
-        implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+        implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0")
+        implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
 
         // Test dependencies
         testImplementation("junit:junit:4.13.2")
