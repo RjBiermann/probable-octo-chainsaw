@@ -7,33 +7,26 @@ on:
     types:
       - completed
 
+permissions: {}
+
 jobs:
   mirror:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     steps:
-    - name: Mirror to Codeberg
-      run: |
-        if ! git clone --bare https://RjBiermann:${{ secrets.GITHUB_TOKEN }}@github.com/RjBiermann/probable-octo-chainsaw.git; then
-          echo "::error::Failed to clone source repository"
-          exit 1
-        fi
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: .github/scripts
 
-        cd probable-octo-chainsaw.git
-
-        if ! git remote add mirror https://RjBiermann:${{ secrets.CODEBERG_TOKEN }}@codeberg.org/RjBiermann/probable-octo-chainsaw.git; then
-          echo "::error::Failed to add mirror remote"
-          exit 1
-        fi
-
-        if ! git push mirror --all --force; then
-          echo "::error::Failed to push branches to mirror"
-          exit 1
-        fi
-
-        if ! git push mirror --tags --force; then
-          echo "::error::Failed to push tags to mirror"
-          exit 1
-        fi
-
-        echo "Successfully mirrored to Codeberg"
+      - name: Mirror to Codeberg
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CODEBERG_TOKEN: ${{ secrets.CODEBERG_TOKEN }}
+          GH_USERNAME: RjBiermann
+        run: |
+          .github/scripts/mirror-repo.sh \
+            https://github.com/RjBiermann/probable-octo-chainsaw.git \
+            https://codeberg.org/RjBiermann/probable-octo-chainsaw.git

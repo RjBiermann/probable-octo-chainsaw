@@ -12,164 +12,109 @@ on:
       - master
       - main
 
+# Restrict default permissions — each job declares only what it needs
+permissions: {}
+
 jobs:
-  build:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: "adopt"
+          java-version: 17
+          cache: "gradle"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Run Tests
+        run: ./gradlew test --parallel --build-cache --no-daemon
+
+      - name: Verify Compilation
+        run: ./gradlew compileDebugKotlin --parallel --build-cache --no-daemon
+
+      - name: Summary
+        if: always()
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "## Validate: Passed :white_check_mark:" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Validate: Failed :x:" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  bump:
+    name: Bump Versions
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Needed to push version bump commits
+    needs: [validate]
+    outputs:
+      bumped: ${{ steps.bump-versions.outputs.bumped }}
+      bumped_plugins: ${{ steps.bump-versions.outputs.bumped_plugins }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          path: "src"
           fetch-depth: 0  # Full history for accurate diff comparison
 
       - name: Check for skip in commit message
         id: skip-check
-        if: github.event_name == 'push'
-        working-directory: src
         run: |
           commit_msg=$(git log -1 --pretty=%B)
           if echo "$commit_msg" | grep -qi "\[skip-bump\]"; then
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Skipping version bump due to [skip-bump] in commit message"
           else
-            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Bump plugin versions
         id: bump-versions
-        if: github.event_name == 'push' && steps.skip-check.outputs.skip != 'true'
-        working-directory: src
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          AFTER_SHA: ${{ github.event.after }}
+        if: steps.skip-check.outputs.skip != 'true'
         run: |
-          bump_all=false
-          changed_files=""
+          .github/scripts/bump-versions.sh \
+            --before "${{ github.event.before }}" \
+            --after "${{ github.event.after }}"
 
-          # Determine changed files from push event
-          if [[ "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]]; then
-            changed_files=$(git diff --name-only HEAD~1 HEAD 2>/dev/null) || bump_all=true
-          else
-            changed_files=$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA" 2>/dev/null) || {
-              echo "::warning::Cannot diff $BEFORE_SHA..$AFTER_SHA (force-push?), bumping all plugins"
-              bump_all=true
-            }
-          fi
-
-          # Bump all if CommonLib changed
-          if [[ "$bump_all" != "true" ]] && echo "$changed_files" | grep -q "^CommonLib/"; then
-            echo "::notice::CommonLib changed - bumping all plugins"
-            bump_all=true
-          fi
-
-          echo "Changed files:"
-          echo "$changed_files"
-
-          # Discover plugins
-          plugins=()
-          for dir in */; do
-            dir_name="${dir%/}"
-            [[ -f "$dir_name/build.gradle.kts" && "$dir_name" != "CommonLib" ]] && plugins+=("$dir_name")
-          done
-
-          if [[ ${#plugins[@]} -eq 0 ]]; then
-            echo "::error::No plugins found"
-            exit 1
-          fi
-          echo "Found ${#plugins[@]} plugins: ${plugins[*]}"
-
-          # Select plugins to bump
-          plugins_to_bump=()
-          if [[ "$bump_all" == "true" ]]; then
-            plugins_to_bump=("${plugins[@]}")
-          else
-            for plugin in "${plugins[@]}"; do
-              echo "$changed_files" | grep -q "^$plugin/" && plugins_to_bump+=("$plugin")
-            done
-          fi
-
-          if [[ ${#plugins_to_bump[@]} -eq 0 ]]; then
-            echo "No plugins to bump"
-            echo "bumped=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          echo "Plugins to bump: ${plugins_to_bump[*]}"
-          bumped_list=""
-
-          for plugin in "${plugins_to_bump[@]}"; do
-            gradle_file="$plugin/build.gradle.kts"
-
-            # Read current version from working tree
-            current_version=$(grep -E "^version[[:space:]]*=" "$gradle_file" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' "'"'" | head -1)
-
-            if ! [[ "$current_version" =~ ^[0-9]+$ ]]; then
-              echo "::error::Cannot parse version for $plugin (got '$current_version')"
-              exit 1
-            fi
-
-            new_version=$((current_version + 1))
-
-            sed -i -E "s/^version[[:space:]]*=.*/version = $new_version/" "$gradle_file"
-
-            # Verify
-            actual=$(grep -E "^version[[:space:]]*=" "$gradle_file" | sed -E 's/version[[:space:]]*=[[:space:]]*//' | tr -d ' ' | head -1)
-            if [[ "$actual" != "$new_version" ]]; then
-              echo "::error::Version update failed for $plugin (expected $new_version, got '$actual')"
-              exit 1
-            fi
-
-            echo "  $plugin: $current_version -> $new_version"
-            bumped_list="$bumped_list $plugin"
-          done
-
-          echo "bumped=true" >> $GITHUB_OUTPUT
-          echo "bumped_plugins=$bumped_list" >> $GITHUB_OUTPUT
-
-      - name: Commit and push version bump
+      - name: Summary
         if: steps.bump-versions.outputs.bumped == 'true'
-        working-directory: src
-        env:
-          BUMPED_PLUGINS: ${{ steps.bump-versions.outputs.bumped_plugins }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          {
+            echo "## Version Bump"
+            echo "Bumped plugins:${{ steps.bump-versions.outputs.bumped_plugins }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          # Stage only build.gradle.kts files for bumped plugins
-          # Use BUMPED_PLUGINS which contains space-separated plugin names
-          for plugin in $BUMPED_PLUGINS; do
-            if [[ -f "$plugin/build.gradle.kts" ]]; then
-              git add "$plugin/build.gradle.kts"
-            else
-              echo "::error::Expected file not found: $plugin/build.gradle.kts"
-              exit 1
-            fi
-          done
-
-          # Verify files were staged
-          if git diff --cached --quiet; then
-            echo "::error::No version changes were staged - this should not happen"
-            exit 1
-          fi
-
-          # Create commit with list of bumped plugins
-          # Include [skip-bump] to prevent infinite loop
-          if ! git commit -m "chore: bump plugin versions for:${BUMPED_PLUGINS} [skip-bump]"; then
-            echo "::error::Failed to commit version bump"
-            exit 1
-          fi
-
-          # Push to current branch
-          if ! git push; then
-            echo "::error::Failed to push version bump. Check branch protection settings."
-            echo "::error::Add 'github-actions[bot]' to bypass list if branch is protected."
-            exit 1
-          fi
+  build:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed to push to builds branch
+    needs: [validate, bump]
+    if: |
+      always() &&
+      needs.validate.result == 'success' &&
+      (needs.bump.result == 'success' || needs.bump.result == 'skipped')
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: "src"
+          ref: ${{ github.ref }}  # Branch HEAD, includes bump commit if pushed
 
       - name: Checkout builds
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: "builds"
           path: "builds"
@@ -189,106 +134,32 @@ jobs:
           fi
 
       - name: Setup JDK 17
-        uses: actions/setup-java@v4.7.1
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: "adopt"
           java-version: 17
           cache: "gradle"
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3.2.2
-
-      - name: Run Tests
-        run: |
-          cd "$GITHUB_WORKSPACE/src"
-          chmod +x gradlew
-
-          # Run tests before building to catch regressions
-          if ! ./gradlew test --parallel --build-cache --no-daemon; then
-            echo "::error::Tests failed - aborting build"
-            exit 1
-          fi
-          echo "All tests passed"
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
 
       - name: Build Plugins
-        run: |
-          cd "$GITHUB_WORKSPACE/src"
-
-          # Run gradle build with explicit error check
-          if ! ./gradlew make makePluginsJson --parallel --build-cache --no-daemon; then
-            echo "::error::Gradle build failed"
-            exit 1
-          fi
-
-          # Verify builds directory exists
-          if [[ ! -d "$GITHUB_WORKSPACE/builds" ]]; then
-            echo "::error::Builds directory does not exist"
-            exit 1
-          fi
-
-          # Copy .cs3 files with verification
-          shopt -s nullglob globstar
-          cs3_files=(**/build/*.cs3)
-          if [[ ${#cs3_files[@]} -eq 0 ]]; then
-            echo "::error::No .cs3 files were produced by the build"
-            exit 1
-          fi
-
-          if ! cp "${cs3_files[@]}" "$GITHUB_WORKSPACE/builds"; then
-            echo "::error::Failed to copy .cs3 files to builds directory"
-            exit 1
-          fi
-          echo "Copied ${#cs3_files[@]} plugin files"
-
-          # Copy plugins.json with verification
-          if [[ ! -f build/plugins.json ]]; then
-            echo "::error::plugins.json was not generated by the build"
-            exit 1
-          fi
-
-          if ! cp build/plugins.json "$GITHUB_WORKSPACE/builds"; then
-            echo "::error::Failed to copy plugins.json to builds directory"
-            exit 1
-          fi
-          echo "Copied plugins.json"
-        # Note: --configuration-cache not used because Cloudstream gradle plugin
-        # tasks (make, deployWithAdb) are incompatible with it
-        # --no-daemon prevents orphan Java processes in CI
+        working-directory: src
+        run: .github/scripts/build-plugins.sh "$GITHUB_WORKSPACE/builds"
 
       - name: Push builds
+        run: src/.github/scripts/push-builds.sh "$GITHUB_WORKSPACE/builds" "$GITHUB_SHA"
+
+      - name: Summary
+        if: always()
         run: |
-          cd "$GITHUB_WORKSPACE/builds"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
-
-          # Check if there are changes to commit
-          if git diff --cached --quiet; then
-            echo "::notice::No changes to commit to builds branch"
-            exit 0
-          fi
-
-          # Check if branch has commits (for amend vs initial commit)
-          has_commits=false
-          if git rev-parse HEAD >/dev/null 2>&1; then
-            has_commits=true
-          fi
-
-          if [[ "$has_commits" == "true" ]]; then
-            if ! git commit --amend -m "Build $GITHUB_SHA"; then
-              echo "::error::Failed to amend build commit"
-              exit 1
-            fi
+          if [[ "${{ job.status }}" == "success" ]]; then
+            {
+              echo "## Build: Success :white_check_mark:"
+              shopt -s nullglob
+              cs3_files=("$GITHUB_WORKSPACE"/builds/*.cs3)
+              echo "Deployed **${#cs3_files[@]}** plugins to builds branch"
+            } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "::notice::Builds branch is new, creating initial commit"
-            if ! git commit -m "Build $GITHUB_SHA"; then
-              echo "::error::Failed to create initial build commit"
-              exit 1
-            fi
+            echo "## Build: Failed :x:" >> "$GITHUB_STEP_SUMMARY"
           fi
-
-          if ! git push --force; then
-            echo "::error::Failed to push builds branch"
-            exit 1
-          fi
-          echo "Successfully pushed builds"
