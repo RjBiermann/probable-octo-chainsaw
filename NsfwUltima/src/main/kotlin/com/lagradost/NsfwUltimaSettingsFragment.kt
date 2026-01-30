@@ -182,7 +182,7 @@ class NsfwUltimaSettingsFragment(
 
         // Reset All Data button
         mainContainer.addView(CloudstreamUI.createSecondaryButton(context, "Reset All Data", colors) {
-            showResetConfirmation(context)
+            if (isAdded) showResetConfirmation()
         }.apply {
             textSize = 14f
             layoutParams = LinearLayout.LayoutParams(
@@ -220,7 +220,7 @@ class NsfwUltimaSettingsFragment(
             val originalSettings = settings
             settings = settings.copy(showPluginNames = isChecked)
             if (!repository.saveSettings(settings)) {
-                Log.e(TAG, "Failed to save settings")
+                Log.e(TAG, "Failed to save settings: showPluginNames=$isChecked (attempted change from ${originalSettings.showPluginNames})")
                 settings = originalSettings  // Revert in-memory state
                 showSaveErrorToast()
                 return@createToggleRow
@@ -330,20 +330,23 @@ class NsfwUltimaSettingsFragment(
                 val groupsSaved = repository.saveHomepages(homepages)
 
                 if (!feedsSaved || !groupsSaved) {
-                    Log.e(TAG, "Failed to save: feeds=$feedsSaved, groups=$groupsSaved")
+                    Log.e(TAG, "Failed to save homepage '${group.name}' (id=${group.id}): feeds=$feedsSaved (${feedList.size} total), groups=$groupsSaved (${homepages.size} total), isNew=$isNew")
                     // Reload to restore consistent state
                     loadData()
                     showSaveErrorToast()
+                    if (!isAdded) return@onSave
                     refreshUI()
                     return@onSave
                 }
 
+                // Re-check lifecycle before UI operations
+                if (!isAdded) return@onSave
                 refreshUI()
                 plugin.refreshAllHomepages()
 
-                context?.let { ctx ->
+                if (isAdded) {
                     android.widget.Toast.makeText(
-                        ctx,
+                        requireContext(),
                         if (isNew) "Homepage created. Restart app to see it." else "Changes saved. Restart app to see updates.",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
@@ -367,19 +370,21 @@ class NsfwUltimaSettingsFragment(
                 feedList.clear()
                 feedList.addAll(result.data.updatedFeeds)
 
+                // Re-check lifecycle before UI operations
+                if (!isAdded) return
                 refreshUI()
                 plugin.refreshAllHomepages()
 
-                context?.let { ctx ->
+                if (isAdded) {
                     android.widget.Toast.makeText(
-                        ctx,
+                        requireContext(),
                         "Homepage deleted. Restart app to see changes.",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
                 }
             }
             is UseCaseResult.Failure -> {
-                Log.e(TAG, "Delete failed: ${result.error}")
+                Log.e(TAG, "Delete homepage failed for '${homepage.name}' (id=${homepage.id}): ${result.error}")
                 showSaveErrorToast()
             }
         }
@@ -424,17 +429,18 @@ class NsfwUltimaSettingsFragment(
     }
 
     private fun showSaveErrorToast() {
-        context?.let { ctx ->
+        if (isAdded) {
             android.widget.Toast.makeText(
-                ctx,
+                requireContext(),
                 "Failed to save changes. Please try again.",
                 android.widget.Toast.LENGTH_LONG
             ).show()
         }
     }
 
-    private fun showResetConfirmation(context: Context) {
-        AlertDialog.Builder(context)
+    private fun showResetConfirmation() {
+        if (!isAdded) return
+        AlertDialog.Builder(requireContext())
             .setTitle("Reset All Data")
             .setMessage("This will remove all your homepages, feeds, and settings. Are you sure?")
             .setPositiveButton("Reset") { _, _ ->
@@ -451,19 +457,23 @@ class NsfwUltimaSettingsFragment(
                         plugin.refreshAllHomepages()
 
                         Log.d(TAG, "All data reset")
-                        android.widget.Toast.makeText(
-                            context,
-                            "All data reset successfully",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
+                        if (isAdded) {
+                            android.widget.Toast.makeText(
+                                requireContext(),
+                                "All data reset successfully",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     }
                     is UseCaseResult.Failure -> {
                         Log.e(TAG, "Failed to reset all data: ${result.error}")
-                        android.widget.Toast.makeText(
-                            context,
-                            "Failed to reset data. Please try again.",
-                            android.widget.Toast.LENGTH_LONG
-                        ).show()
+                        if (isAdded) {
+                            android.widget.Toast.makeText(
+                                requireContext(),
+                                "Failed to reset data. Please try again.",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
                     }
                 }
             }

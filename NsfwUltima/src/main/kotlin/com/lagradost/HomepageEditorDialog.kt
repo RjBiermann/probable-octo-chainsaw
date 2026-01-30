@@ -65,8 +65,7 @@ class HomepageEditorDialog(
     }
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
-        val context = requireContext()
-        colors = CloudstreamUI.UIColors.fromContext(context)
+        colors = CloudstreamUI.UIColors.fromContext(requireContext())
 
         // Initialize selected feeds from existing homepage feeds
         selectedFeeds.clear()
@@ -81,8 +80,8 @@ class HomepageEditorDialog(
                 ))
             }
 
-        val contentView = createDialogView(context)
-        return DialogUtils.createTvOrBottomSheetDialog(context, isTvMode, theme, contentView, 0.95)
+        val contentView = createDialogView()
+        return DialogUtils.createTvOrBottomSheetDialog(requireContext(), isTvMode, theme, contentView, 0.95)
     }
 
     override fun onStart() {
@@ -103,7 +102,8 @@ class HomepageEditorDialog(
         super.onDismiss(dialog)
     }
 
-    private fun createDialogView(context: Context): View {
+    private fun createDialogView(): View {
+        val context = requireContext()
         val scrollView = NestedScrollView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -193,7 +193,7 @@ class HomepageEditorDialog(
         feedsHeaderRow.addView(selectedCountText)
 
         reorderButton = CloudstreamUI.createCompactOutlinedButton(context, "Reorder", colors) {
-            showReorderDialog(context)
+            if (isAdded) showReorderDialog()
         }
         feedsHeaderRow.addView(reorderButton)
 
@@ -227,7 +227,7 @@ class HomepageEditorDialog(
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 override fun afterTextChanged(s: Editable?) {
                     filterQuery = s?.toString()?.lowercase()?.trim() ?: ""
-                    rebuildFeedsList(context)
+                    rebuildFeedsList()
                 }
             })
         }
@@ -250,13 +250,16 @@ class HomepageEditorDialog(
         scrollView.addView(mainContainer)
 
         // Initial render
-        rebuildFeedsList(context)
+        rebuildFeedsList()
         updateHeader()
 
         return scrollView
     }
 
-    private fun rebuildFeedsList(context: Context) {
+    private fun rebuildFeedsList() {
+        if (!isAdded) return
+        val context = requireContext()
+
         // Save focused chip tag for TV mode focus restoration
         val focusedTag = if (isTvMode) feedsContainer.findFocus()?.tag else null
 
@@ -294,7 +297,7 @@ class HomepageEditorDialog(
 
             feeds.forEach { feed ->
                 val isSelected = selectedFeeds.any { it.key() == feed.key() }
-                val chip = createFeedChip(context, feed, isSelected)
+                val chip = createFeedChip(feed, isSelected)
                 chipGroup.addView(chip)
             }
 
@@ -311,8 +314,8 @@ class HomepageEditorDialog(
         }
     }
 
-    private fun createFeedChip(context: Context, feed: AvailableFeed, isSelected: Boolean): Chip {
-        return Chip(context).apply {
+    private fun createFeedChip(feed: AvailableFeed, isSelected: Boolean): Chip {
+        return Chip(requireContext()).apply {
             tag = feed.key()
 
             if (isSelected) {
@@ -343,7 +346,7 @@ class HomepageEditorDialog(
 
             setOnClickListener {
                 toggleFeed(feed)
-                rebuildFeedsList(context)
+                rebuildFeedsList()
                 updateHeader()
             }
 
@@ -368,16 +371,17 @@ class HomepageEditorDialog(
         reorderButton.visibility = if (count > 1) View.VISIBLE else View.GONE
     }
 
-    private fun showReorderDialog(context: Context) {
-        if (selectedFeeds.size < 2) return
+    private fun showReorderDialog() {
+        if (!isAdded || selectedFeeds.size < 2) return
 
         val dialog = ReorderFeedsDialog(
             feeds = selectedFeeds.toList(),
             showPluginNames = showPluginNames,
             onReorder = { reorderedFeeds ->
+                if (!isAdded) return@ReorderFeedsDialog
                 selectedFeeds.clear()
                 selectedFeeds.addAll(reorderedFeeds)
-                rebuildFeedsList(context)
+                rebuildFeedsList()
             }
         )
         dialog.show(parentFragmentManager, "ReorderFeedsDialog")
@@ -392,9 +396,9 @@ class HomepageEditorDialog(
             existingGroup != null -> existingGroup.name
             else -> {
                 // New homepage with no name - show feedback and discard
-                context?.let {
+                if (isAdded) {
                     android.widget.Toast.makeText(
-                        it,
+                        requireContext(),
                         "Homepage not saved - name required",
                         android.widget.Toast.LENGTH_SHORT
                     ).show()

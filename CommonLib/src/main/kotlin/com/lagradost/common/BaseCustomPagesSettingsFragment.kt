@@ -101,6 +101,20 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
         return repository?.save(pages) ?: false
     }
 
+    /**
+     * Clear all custom pages from storage.
+     * Default implementation clears by saving an empty list via savePages().
+     *
+     * Subclasses using the repository pattern don't need to override this.
+     * Override only if your storage backend has an optimized bulk-delete operation
+     * that's more efficient than saving an empty list.
+     *
+     * @return true on success, false on failure
+     */
+    protected open fun clearPages(): Boolean {
+        return savePages(emptyList())
+    }
+
     // ===== Instance state =====
 
     private var currentPages = mutableListOf<CustomPage>()
@@ -323,7 +337,7 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
         // Reorder button (TV mode only)
         if (isTvMode) {
             reorderModeButton = CloudstreamUI.createCompactOutlinedButton(context, "Reorder", colors) {
-                toggleReorderMode(context)
+                toggleReorderMode()
             }
             sectionsHeaderRow.addView(reorderModeButton)
         }
@@ -380,7 +394,7 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
                 if (sourceIndex >= 0) {
                     val pageToDelete = currentPages[sourceIndex]
                     DialogUtils.showDeleteConfirmation(
-                        context = context,
+                        context = requireContext(),
                         itemName = pageToDelete.label,
                         itemType = "page"
                     ) {
@@ -388,7 +402,10 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
                         val removed = currentPages.removeAt(sourceIndex)
                         if (!savePages(currentPages)) {
                             currentPages.add(sourceIndex, removed)
-                            Toast.makeText(context, "Failed to save changes", Toast.LENGTH_SHORT).show()
+                            Log.e(logTag, "Delete page failed: savePages() returned false for page '${removed.label}' at index $sourceIndex")
+                            if (isAdded) {
+                                Toast.makeText(requireContext(), "Failed to save changes", Toast.LENGTH_SHORT).show()
+                            }
                             return@showDeleteConfirmation
                         }
                         adapter.submitList(currentPages)
@@ -433,17 +450,31 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
         if (!isTvMode) {
             val touchHelperCallback = CustomPageItemTouchHelper(adapter) {
                 // Called when drag completes - persist the new order
+                if (!isAdded) return@CustomPageItemTouchHelper
                 val newItems = adapter.getItems()
                 // Guard against accidental data loss from empty adapter
                 if (newItems.isNotEmpty() || currentPages.isEmpty()) {
                     val oldItems = currentPages.toList()
                     currentPages.clear()
                     currentPages.addAll(newItems)
-                    if (!savePages(currentPages)) {
+
+                    // Re-check lifecycle before storage mutation (critical!)
+                    if (!isAdded) {
+                        Log.w(logTag, "Fragment detached before savePages(), aborting drag persist")
                         currentPages.clear()
                         currentPages.addAll(oldItems)
                         adapter.submitList(currentPages)
-                        Toast.makeText(context, "Failed to save changes", Toast.LENGTH_SHORT).show()
+                        return@CustomPageItemTouchHelper
+                    }
+
+                    if (!savePages(currentPages)) {
+                        Log.e(logTag, "Drag reorder failed: savePages() returned false, ${newItems.size} items attempted, rolling back to ${oldItems.size} items")
+                        currentPages.clear()
+                        currentPages.addAll(oldItems)
+                        adapter.submitList(currentPages)
+                        if (isAdded) {
+                            Toast.makeText(requireContext(), "Failed to save changes", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }
@@ -504,6 +535,7 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
                     currentPages.add(newPage)
                     if (!savePages(currentPages)) {
                         currentPages.removeAt(currentPages.size - 1)
+                        Log.e(logTag, "Add page failed: savePages() returned false for new page '${newPage.label}' (${newPage.path})")
                         statusText.text = "Failed to save. Please try again."
                         return@setOnClickListener
                     }
@@ -534,6 +566,21 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
         mainContainer.addView(filterInputLayout)
         mainContainer.addView(emptyStateText)
         mainContainer.addView(sectionsRecyclerView)
+
+        // Reset All Data button
+        val resetButton = CloudstreamUI.createDangerButton(context, "Reset All Data", colors) {
+            showResetConfirmation()
+        }.apply {
+            textSize = 14f
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(context, 16)
+            }
+        }
+        mainContainer.addView(resetButton)
+
         scrollView.addView(mainContainer)
 
         // Initial list render
@@ -564,7 +611,7 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
         }
     }
 
-    private fun toggleReorderMode(context: Context) {
+    private fun toggleReorderMode() {
         isReorderMode = !isReorderMode
         selectedReorderPosition = -1
 
@@ -583,7 +630,7 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
     }
 
     private fun onPageTappedForReorder(position: Int) {
-        if (!isReorderMode) return
+        if (!isReorderMode || !isAdded) return
 
         val context = requireContext()
 
@@ -612,7 +659,10 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
                 if (!savePages(currentPages)) {
                     currentPages.removeAt(destIdx)
                     currentPages.add(sourceIdx, movedItem)
-                    Toast.makeText(context, "Failed to save changes", Toast.LENGTH_SHORT).show()
+                    Log.e(logTag, "Reorder move failed: savePages() returned false for moving '${movedItem.label}' from $sourceIdx to $destIdx")
+                    if (isAdded) {
+                        Toast.makeText(requireContext(), "Failed to save changes", Toast.LENGTH_SHORT).show()
+                    }
                 }
                 adapter.submitList(currentPages)
             }
@@ -645,6 +695,103 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
                 android.util.Log.d(logTag, "restoreFocusToPosition: requestFocus() failed for position $position")
             }
         }
+    }
+
+    /**
+     * Show confirmation dialog before resetting all data.
+     *
+     * On confirmation, performs:
+     * - Lifecycle safety checks (fragment may detach while dialog is open)
+     * - Backup and rollback on storage failure
+     * - UI state reset (adapter, empty state, reorder mode)
+     * - TV focus restoration after list changes
+     */
+    private fun showResetConfirmation() {
+        if (!isAdded) return
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("Reset All Data")
+            .setMessage("This will permanently delete all your custom sections. This cannot be undone. Are you sure?")
+            .setPositiveButton("Reset") { _, _ ->
+                // Lifecycle safety: User may navigate away while dialog is open,
+                // causing fragment to detach. Without this check, Toast/UI operations
+                // would crash with IllegalStateException: Fragment not attached to a context.
+                if (!isAdded) return@setPositiveButton
+
+                // Create backup for rollback if clearPages() fails.
+                // Critical: Without rollback, UI would show empty list while storage still has data,
+                // creating inconsistency that persists until app restart.
+                val oldPages = currentPages.toList()
+
+                // Prevent storage mutation if fragment is detaching
+                if (!isAdded) {
+                    Log.w(logTag, "Fragment detached before clearPages(), aborting reset")
+                    return@setPositiveButton
+                }
+
+                if (clearPages()) {
+                    // Success: Clear in-memory state and update UI
+                    currentPages.clear()
+                    adapter.submitList(emptyList())
+                    updateEmptyState()
+
+                    // Reorder mode becomes invalid when list is empty (no items to select/move).
+                    // Reset to default state to prevent UI inconsistencies.
+                    if (isTvMode && isReorderMode) {
+                        isReorderMode = false
+                        selectedReorderPosition = -1
+                        adapter.setReorderMode(false, -1)
+                        reorderModeButton?.let { button ->
+                            button.text = "Reorder"
+                            CloudstreamUI.setCompactButtonOutlined(button, colors)
+                        }
+                        reorderSubtitle?.text = getReorderSubtitleText()
+                    }
+
+                    // Focus loop must be reconfigured after RecyclerView content changes
+                    if (isTvMode) {
+                        TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
+                    }
+
+                    if (isAdded) {
+                        Toast.makeText(
+                            requireContext(),
+                            "All data reset successfully",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                } else {
+                    // Failure: Restore in-memory state from backup to maintain UI/storage consistency.
+                    Log.e(logTag, "Reset All Data failed: clearPages() returned false")
+
+                    // Use clear() + addAll() to preserve the existing MutableList reference
+                    // (adapter and other code may hold references to currentPages).
+                    currentPages.clear()
+                    currentPages.addAll(oldPages)
+                    adapter.submitList(currentPages)
+                    updateEmptyState()
+
+                    // Restore reorder mode state if it was active
+                    if (isTvMode && isReorderMode) {
+                        adapter.setReorderMode(isReorderMode, selectedReorderPosition)
+                    }
+
+                    // Re-enable focus loop on TV
+                    if (isTvMode) {
+                        TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
+                    }
+
+                    if (isAdded) {
+                        Toast.makeText(
+                            requireContext(),
+                            "Failed to clear data. Please try again.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun dp(context: Context, dp: Int): Int = TvFocusUtils.dpToPx(context, dp)

@@ -37,6 +37,7 @@ AI is a great tool. However, we want you to follow these rules regarding usage o
 ./gradlew makePluginsJson       # Generate plugins.json manifest
 ./gradlew test                  # Run all tests
 ./gradlew :PluginName:test      # Run single plugin's tests (e.g., :Neporn:test)
+./gradlew :PluginName:compileDebugKotlin  # Quick compilation check without full build
 ./gradlew clean                 # Clean build directory
 ./gradlew build --warning-mode all  # Show deprecation warnings
 ```
@@ -107,9 +108,127 @@ All settings UIs are built programmatically (no XML) using Material components:
 
 **Storage error handling:** Storage save methods should return `Boolean` success/failure. Callers must check the return value and show user feedback (Toast) on failure. Never silently ignore save failures.
 
+**Error logging with context:** Always log storage failures with operation context for debugging:
+```kotlin
+if (!savePages(newPages)) {
+    Log.e(tag, "addPage failed: savePages() returned false for '${page.label}'")
+    // User feedback
+}
+```
+
+**Complete error recovery pattern:** On storage failures, restore ALL UI state, not just data:
+```kotlin
+val oldData = currentData.toList()  // Backup before mutation
+if (!saveData(newData)) {
+    // Restore data
+    currentData.clear()
+    currentData.addAll(oldData)
+    adapter.submitList(currentData)
+    // Restore UI state
+    updateEmptyState()
+    if (isTvMode) {
+        restoreReorderMode()  // if applicable
+        TvFocusUtils.enableFocusLoopWithRecyclerView(container, recyclerView)
+    }
+    // Log with context
+    Log.e(tag, "OperationName failed: saveData() returned false")
+    // User feedback
+    Toast.makeText(requireContext(), "Failed message", Toast.LENGTH_LONG).show()
+}
+```
+
 **Dialog callbacks:** When dialogs modify data and call parent callbacks (e.g., `onGroupsChanged`), the parent must call UI refresh methods (e.g., `refreshGroupedView()`) to update the display. Changes won't reflect automatically.
 
 **Async callback lifecycle safety:** Callbacks from AlertDialogs, confirmation dialogs, or any async operations must check `if (!isAdded) return@callback` at the start. The fragment may detach while the dialog is open.
+
+**CRITICAL: Never capture context parameters in callbacks.** Methods that take `context: Context` and pass it to callbacks create stale context crashes:
+```kotlin
+// ❌ WRONG - Captured context becomes stale
+fun createView(context: Context) {
+    button.setOnClickListener {
+        showDialog(context)  // CRASH if fragment detached
+        Toast.makeText(context, ...).show()  // CRASH
+    }
+}
+
+// ✓ CORRECT - Fresh context after lifecycle check
+fun createView(context: Context) {
+    button.setOnClickListener {
+        if (!isAdded) return@setOnClickListener
+        showDialog()  // Method uses requireContext() internally
+        Toast.makeText(requireContext(), ...).show()
+    }
+}
+```
+
+**Pattern:** Methods called from callbacks should not take `context` parameters. Instead, check `isAdded` internally and call `requireContext()` when needed.
+
+**Double lifecycle checks for storage mutations:** In async dialog callbacks, check `isAdded` twice - once at callback start, again immediately before storage mutation:
+```kotlin
+.setPositiveButton("Delete") { _, _ ->
+    if (!isAdded) return@setPositiveButton  // First check
+    val backup = data.toList()
+    if (!isAdded) {  // Second check before mutation
+        Log.w(tag, "Fragment detached before storage mutation, aborting")
+        return@setPositiveButton
+    }
+    if (clearStorage()) { /* success */ } else { /* restore from backup */ }
+}
+```
+
+**Re-check lifecycle after async operations:** Repository operations and use cases can take time. Re-check `isAdded` before UI operations:
+```kotlin
+onSave = { data ->
+    if (!isAdded) return@onSave  // Initial check
+
+    // Repository operations (can take time - fragment may detach)
+    val saved = repository.save(data)
+
+    // Re-check before UI updates
+    if (!isAdded) return@onSave
+    refreshUI()
+    Toast.makeText(requireContext(), "Saved", Toast.LENGTH_SHORT).show()
+}
+```
+
+**Never create dummy objects on lifecycle failure:** When lifecycle checks fail, return early - don't create fallback UI objects:
+```kotlin
+// ❌ WRONG - requireContext() crashes if !isAdded
+private fun createChip(): Chip {
+    if (!isAdded) return Chip(requireContext())  // CRASH!
+    return Chip(requireContext()).apply { /* config */ }
+}
+
+// ✓ CORRECT - Caller checks lifecycle
+private fun createChip(): Chip {
+    return Chip(requireContext()).apply { /* config */ }
+}
+
+// Caller's responsibility to check before calling
+private fun rebuildUI() {
+    if (!isAdded) return  // Safe - createChip() won't be called
+    chips.forEach { container.addView(createChip()) }
+}
+```
+
+**Documentation for complex methods:** Use KDoc for method contracts, inline comments for WHY (not WHAT):
+```kotlin
+/**
+ * Clear all data. Handles lifecycle safety, backup/rollback, UI state reset, and TV focus.
+ */
+private fun clearAll() {
+    if (!isAdded) return
+
+    // Lifecycle safety: User may navigate away while dialog is open,
+    // causing fragment to detach. Without this check, Toast/UI operations
+    // would crash with IllegalStateException.
+    if (!isAdded) return@callback
+
+    // Reorder mode becomes invalid when list is empty (no items to select/move).
+    // Reset to default state to prevent UI inconsistencies.
+    if (isTvMode && isReorderMode) { resetReorderMode() }
+}
+```
 
 ### TV Mode Support
 
