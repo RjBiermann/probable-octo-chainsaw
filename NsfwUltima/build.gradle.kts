@@ -1,4 +1,4 @@
-version = 9
+version = 10
 
 cloudstream {
     description = "Aggregates all NSFW plugins into one homepage with centralized feed management"
