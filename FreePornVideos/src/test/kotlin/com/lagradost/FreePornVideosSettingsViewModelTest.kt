@@ -37,8 +37,8 @@ class FreePornVideosSettingsViewModelTest {
     }
 
     @Test
-    fun `initial state is correct`() = runTest {
-        val state = viewModel.uiState.first()
+    fun `state after init load is correct`() = runTest {
+        val state = viewModel.uiState.first { !it.isLoading }
 
         assertTrue(state.pages.isEmpty())
         assertTrue(state.filteredPages.isEmpty())

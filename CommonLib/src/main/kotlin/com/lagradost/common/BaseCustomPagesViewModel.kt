@@ -39,7 +39,7 @@ abstract class BaseCustomPagesViewModel(
     data class SettingsUiState(
         val pages: List<CustomPage> = emptyList(),
         val filteredPages: List<CustomPage> = emptyList(),
-        val isLoading: Boolean = false,
+        val isLoading: Boolean = true,
         val errorMessage: String? = null,
         val filterQuery: String = "",
         val isReorderMode: Boolean = false,
