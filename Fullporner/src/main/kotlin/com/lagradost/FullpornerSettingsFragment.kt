@@ -1,6 +1,7 @@
 package com.lagradost
 
 import com.lagradost.common.BaseCustomPagesSettingsFragment
+import com.lagradost.common.CustomPagesViewModelFactory
 import com.lagradost.common.ValidationResult
 
 class FullpornerSettingsFragment : BaseCustomPagesSettingsFragment() {
@@ -18,7 +19,11 @@ class FullpornerSettingsFragment : BaseCustomPagesSettingsFragment() {
 
     override val logTag = "FullpornerSettings"
 
-    override val repository = FullpornerPlugin.createRepository(logTag)
+    override val validator: (String) -> ValidationResult = FullpornerUrlValidator::validate
 
-    override fun validateUrl(url: String): ValidationResult = FullpornerUrlValidator.validate(url)
+    override val viewModel = CustomPagesViewModelFactory.create(
+        repository = FullpornerPlugin.createRepository("FullpornerVM"),
+        validator = validator,
+        logTag = "FullpornerVM"
+    )
 }

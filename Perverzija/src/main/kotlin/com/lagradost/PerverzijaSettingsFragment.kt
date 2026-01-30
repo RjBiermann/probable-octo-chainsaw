@@ -1,6 +1,7 @@
 package com.lagradost
 
 import com.lagradost.common.BaseCustomPagesSettingsFragment
+import com.lagradost.common.CustomPagesViewModelFactory
 import com.lagradost.common.ValidationResult
 
 class PerverzijaSettingsFragment : BaseCustomPagesSettingsFragment() {
@@ -20,7 +21,11 @@ class PerverzijaSettingsFragment : BaseCustomPagesSettingsFragment() {
 
     override val logTag = "PerverzijaSettings"
 
-    override val repository = PerverzijaPlugin.createRepository(logTag)
+    override val validator: (String) -> ValidationResult = PerverzijaUrlValidator::validate
 
-    override fun validateUrl(url: String): ValidationResult = PerverzijaUrlValidator.validate(url)
+    override val viewModel = CustomPagesViewModelFactory.create(
+        repository = PerverzijaPlugin.createRepository("PerverzijaVM"),
+        validator = validator,
+        logTag = "PerverzijaVM"
+    )
 }

@@ -1,6 +1,7 @@
 package com.lagradost
 
 import com.lagradost.common.BaseCustomPagesSettingsFragment
+import com.lagradost.common.CustomPagesViewModelFactory
 import com.lagradost.common.ValidationResult
 
 class PornXpSettingsFragment : BaseCustomPagesSettingsFragment() {
@@ -18,7 +19,11 @@ class PornXpSettingsFragment : BaseCustomPagesSettingsFragment() {
 
     override val logTag = "PornXpSettings"
 
-    override val repository = PornXpPlugin.createRepository(logTag)
+    override val validator: (String) -> ValidationResult = PornXpUrlValidator::validate
 
-    override fun validateUrl(url: String): ValidationResult = PornXpUrlValidator.validate(url)
+    override val viewModel = CustomPagesViewModelFactory.create(
+        repository = PornXpPlugin.createRepository("PornXpVM"),
+        validator = validator,
+        logTag = "PornXpVM"
+    )
 }

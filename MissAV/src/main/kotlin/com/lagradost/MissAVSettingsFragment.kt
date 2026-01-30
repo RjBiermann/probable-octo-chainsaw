@@ -1,6 +1,7 @@
 package com.lagradost
 
 import com.lagradost.common.BaseCustomPagesSettingsFragment
+import com.lagradost.common.CustomPagesViewModelFactory
 import com.lagradost.common.ValidationResult
 
 class MissAVSettingsFragment : BaseCustomPagesSettingsFragment() {
@@ -21,7 +22,11 @@ class MissAVSettingsFragment : BaseCustomPagesSettingsFragment() {
 
     override val logTag = "MissAVSettings"
 
-    override val repository = MissAVPlugin.createRepository(logTag)
+    override val validator: (String) -> ValidationResult = MissAVUrlValidator::validate
 
-    override fun validateUrl(url: String): ValidationResult = MissAVUrlValidator.validate(url)
+    override val viewModel = CustomPagesViewModelFactory.create(
+        repository = MissAVPlugin.createRepository("MissAVVM"),
+        validator = validator,
+        logTag = "MissAVVM"
+    )
 }

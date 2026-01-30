@@ -12,4 +12,7 @@ cloudstream {
 dependencies {
     implementation(project(":CommonLib"))
     implementation("com.google.android.material:material:1.13.0")
+
+    // Test dependencies for architecture components
+    testImplementation(project(":CommonLib"))
 }

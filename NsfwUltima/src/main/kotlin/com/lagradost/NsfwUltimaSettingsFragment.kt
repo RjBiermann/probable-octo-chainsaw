@@ -15,7 +15,7 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
-import androidx.core.widget.NestedScrollView
+import com.lagradost.common.SafeNestedScrollView
 import androidx.fragment.app.DialogFragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -124,7 +124,7 @@ class NsfwUltimaSettingsFragment(
     }
 
     private fun createSettingsView(context: Context): View {
-        val scrollView = NestedScrollView(context).apply {
+        val scrollView = SafeNestedScrollView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT

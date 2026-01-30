@@ -1,6 +1,7 @@
 package com.lagradost
 
 import com.lagradost.common.BaseCustomPagesSettingsFragment
+import com.lagradost.common.CustomPagesViewModelFactory
 import com.lagradost.common.ValidationResult
 
 class SevenMmTvSettingsFragment : BaseCustomPagesSettingsFragment() {
@@ -20,7 +21,11 @@ class SevenMmTvSettingsFragment : BaseCustomPagesSettingsFragment() {
 
     override val logTag = "SevenMmTvSettings"
 
-    override val repository = SevenMmTvPlugin.createRepository(logTag)
+    override val validator: (String) -> ValidationResult = SevenMmTvUrlValidator::validate
 
-    override fun validateUrl(url: String): ValidationResult = SevenMmTvUrlValidator.validate(url)
+    override val viewModel = CustomPagesViewModelFactory.create(
+        repository = SevenMmTvPlugin.createRepository("SevenMmTvVM"),
+        validator = validator,
+        logTag = "SevenMmTvVM"
+    )
 }

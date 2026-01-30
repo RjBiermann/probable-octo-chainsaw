@@ -1,6 +1,7 @@
 package com.lagradost
 
 import com.lagradost.common.BaseCustomPagesSettingsFragment
+import com.lagradost.common.CustomPagesViewModelFactory
 import com.lagradost.common.ValidationResult
 
 class JavGuruSettingsFragment : BaseCustomPagesSettingsFragment() {
@@ -22,7 +23,11 @@ class JavGuruSettingsFragment : BaseCustomPagesSettingsFragment() {
 
     override val logTag = "JavGuruSettings"
 
-    override val repository = JavGuruPlugin.createRepository(logTag)
+    override val validator: (String) -> ValidationResult = JavGuruUrlValidator::validate
 
-    override fun validateUrl(url: String): ValidationResult = JavGuruUrlValidator.validate(url)
+    override val viewModel = CustomPagesViewModelFactory.create(
+        repository = JavGuruPlugin.createRepository("JavGuruVM"),
+        validator = validator,
+        logTag = "JavGuruVM"
+    )
 }

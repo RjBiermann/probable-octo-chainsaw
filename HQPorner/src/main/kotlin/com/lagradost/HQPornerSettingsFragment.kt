@@ -1,6 +1,7 @@
 package com.lagradost
 
 import com.lagradost.common.BaseCustomPagesSettingsFragment
+import com.lagradost.common.CustomPagesViewModelFactory
 import com.lagradost.common.ValidationResult
 
 class HQPornerSettingsFragment : BaseCustomPagesSettingsFragment() {
@@ -20,7 +21,11 @@ class HQPornerSettingsFragment : BaseCustomPagesSettingsFragment() {
 
     override val logTag = "HQPornerSettings"
 
-    override val repository = HQPornerPlugin.createRepository(logTag)
+    override val validator: (String) -> ValidationResult = HQPornerUrlValidator::validate
 
-    override fun validateUrl(url: String): ValidationResult = HQPornerUrlValidator.validate(url)
+    override val viewModel = CustomPagesViewModelFactory.create(
+        repository = HQPornerPlugin.createRepository("HQPornerVM"),
+        validator = validator,
+        logTag = "HQPornerVM"
+    )
 }

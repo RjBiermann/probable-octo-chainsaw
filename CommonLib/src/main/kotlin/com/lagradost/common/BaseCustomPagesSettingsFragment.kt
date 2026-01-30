@@ -13,30 +13,36 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.widget.NestedScrollView
 import androidx.fragment.app.DialogFragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 /**
  * Base class for custom pages settings dialog fragments.
- * Provides all common UI and functionality for managing custom homepage sections.
+ * Provides all common UI and functionality for managing custom homepage sections
+ * using reactive ViewModel state management.
  *
  * Subclasses need to override:
  * - Site-specific configuration (domain, examples, error messages)
- * - URL validation logic
- * - Repository for storage operations
+ * - URL validation function
+ * - ViewModel instance
  *
- * Example implementation using Repository pattern:
+ * Example:
  * ```kotlin
  * class MyPluginSettingsFragment : BaseCustomPagesSettingsFragment() {
  *     override val siteDomain = "example.com"
@@ -44,13 +50,13 @@ import com.google.android.material.textfield.TextInputLayout
  *     override val invalidPathMessage = "Invalid URL (use category or tag pages)"
  *     override val logTag = "MyPluginSettings"
  *
- *     override val repository = GlobalStorageCustomPagesRepository(
- *         storageKey = MyPlugin.STORAGE_KEY,
- *         legacyPrefsName = MyPlugin.LEGACY_PREFS_NAME,
- *         tag = logTag
- *     )
+ *     override val validator: (String) -> ValidationResult = MyUrlValidator::validate
  *
- *     override fun validateUrl(url: String) = MyUrlValidator.validate(url)
+ *     override val viewModel = CustomPagesViewModelFactory.create(
+ *         repository = MyPlugin.createRepository("MyPluginVM"),
+ *         validator = validator,
+ *         logTag = "MyPluginVM"
+ *     )
  * }
  * ```
  */
@@ -70,65 +76,25 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
     /** Tag used for logging */
     protected abstract val logTag: String
 
-    /** Repository for storage operations. Override this to use the Repository pattern. */
-    protected open val repository: CustomPagesRepository? = null
+    /** ViewModel for reactive state management. */
+    protected abstract val viewModel: BaseCustomPagesViewModel
 
-    /** Validate a URL and return the result */
-    protected abstract fun validateUrl(url: String): ValidationResult
+    /** URL validation function (plugin-specific). Used for real-time input validation and passed to the factory. */
+    protected abstract val validator: (String) -> ValidationResult
 
-    /**
-     * Load custom pages from storage.
-     * Default implementation delegates to repository if provided.
-     * Override this if not using repository pattern.
-     */
-    protected open fun loadPages(): List<CustomPage> {
-        if (repository == null) {
-            Log.w(logTag, "loadPages: repository is null - override loadPages() or provide repository")
-        }
-        return repository?.load() ?: emptyList()
-    }
-
-    /**
-     * Save custom pages to storage.
-     * Default implementation delegates to repository if provided.
-     * Override this if not using repository pattern.
-     * @return true on success, false on failure
-     */
-    protected open fun savePages(pages: List<CustomPage>): Boolean {
-        if (repository == null) {
-            Log.w(logTag, "savePages: repository is null - override savePages() or provide repository")
-        }
-        return repository?.save(pages) ?: false
-    }
-
-    /**
-     * Clear all custom pages from storage.
-     * Default implementation clears by saving an empty list via savePages().
-     *
-     * Subclasses using the repository pattern don't need to override this.
-     * Override only if your storage backend has an optimized bulk-delete operation
-     * that's more efficient than saving an empty list.
-     *
-     * @return true on success, false on failure
-     */
-    protected open fun clearPages(): Boolean {
-        return savePages(emptyList())
-    }
-
-    // ===== Instance state =====
-
-    private var currentPages = mutableListOf<CustomPage>()
     private lateinit var mainContainer: LinearLayout
     private lateinit var sectionsRecyclerView: RecyclerView
     private lateinit var adapter: CustomPagesAdapter
     private lateinit var emptyStateText: TextView
     private var itemTouchHelper: ItemTouchHelper? = null
+    private lateinit var progressBar: ProgressBar
+    private var stateCollectionJob: Job? = null
 
     // Tap-and-reorder state (TV mode only)
     private var reorderModeButton: MaterialButton? = null
     private var reorderSubtitle: TextView? = null
     private var isReorderMode = false
-    private var selectedReorderPosition: Int = -1
+    private var selectedReorderPosition: Int? = null
 
     // TV mode detection - evaluated once per fragment lifecycle
     private val isTvMode by lazy { TvFocusUtils.isTvMode(requireContext()) }
@@ -138,14 +104,11 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
     private val textColor get() = colors.text
     private val grayTextColor get() = colors.textGray
     private val backgroundColor get() = colors.background
-    private val cardColor get() = colors.card
     private val primaryColor get() = colors.primary
-    private val onPrimaryColor get() = colors.onPrimary
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val context = requireContext()
         colors = CloudstreamUI.UIColors.fromContext(context)
-        currentPages = loadPages().toMutableList()
 
         val contentView = createSettingsView(context)
 
@@ -185,6 +148,17 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
 
     override fun onStart() {
         super.onStart()
+
+        // Observe ViewModel state changes. Manually cancelled in onStop() to approximate STARTED lifecycle scoping.
+        // Cancel previous job to avoid duplicate collectors since onStart() can be called multiple times.
+        stateCollectionJob?.cancel()
+        stateCollectionJob = lifecycleScope.launch {
+            viewModel.uiState.collect { state ->
+                if (!isAdded) return@collect
+                updateUIFromState(state)
+            }
+        }
+
         // Request initial focus on TV after dialog is shown
         if (isTvMode) {
             dialog?.window?.decorView?.post {
@@ -195,8 +169,14 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        stateCollectionJob?.cancel()
+        stateCollectionJob = null
+    }
+
     private fun createSettingsView(context: Context): View {
-        val scrollView = NestedScrollView(context).apply {
+        val scrollView = SafeNestedScrollView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -337,7 +317,7 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
         // Reorder button (TV mode only)
         if (isTvMode) {
             reorderModeButton = CloudstreamUI.createCompactOutlinedButton(context, "Reorder", colors) {
-                toggleReorderMode()
+                viewModel.toggleReorderMode()
             }
             sectionsHeaderRow.addView(reorderModeButton)
         }
@@ -390,42 +370,8 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
             grayTextColor = grayTextColor,
             primaryColor = primaryColor,
             onRemove = { position ->
-                val sourceIndex = adapter.getSourceIndex(position)
-                if (sourceIndex >= 0) {
-                    val pageToDelete = currentPages[sourceIndex]
-                    DialogUtils.showDeleteConfirmation(
-                        context = requireContext(),
-                        itemName = pageToDelete.label,
-                        itemType = "page"
-                    ) {
-                        if (!isAdded) return@showDeleteConfirmation
-                        val removed = currentPages.removeAt(sourceIndex)
-                        if (!savePages(currentPages)) {
-                            currentPages.add(sourceIndex, removed)
-                            Log.e(logTag, "Delete page failed: savePages() returned false for page '${removed.label}' at index $sourceIndex")
-                            if (isAdded) {
-                                Toast.makeText(requireContext(), "Failed to save changes", Toast.LENGTH_SHORT).show()
-                            }
-                            return@showDeleteConfirmation
-                        }
-                        adapter.submitList(currentPages)
-                        updateEmptyState()
-                        // Reset reorder mode when list changes
-                        if (isTvMode && isReorderMode) {
-                            isReorderMode = false
-                            selectedReorderPosition = -1
-                            adapter.setReorderMode(false, -1)
-                            reorderModeButton?.let { button ->
-                                button.text = "Reorder"
-                                CloudstreamUI.setCompactButtonOutlined(button, colors)
-                            }
-                            reorderSubtitle?.text = getReorderSubtitleText()
-                        }
-                        if (isTvMode) {
-                            TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
-                        }
-                    }
-                }
+                if (!isAdded) return@CustomPagesAdapter
+                viewModel.deletePage(position)
             },
             onStartDrag = { viewHolder ->
                 itemTouchHelper?.startDrag(viewHolder)
@@ -451,31 +397,16 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
             val touchHelperCallback = CustomPageItemTouchHelper(adapter) {
                 // Called when drag completes - persist the new order
                 if (!isAdded) return@CustomPageItemTouchHelper
+
                 val newItems = adapter.getItems()
                 // Guard against accidental data loss from empty adapter
-                if (newItems.isNotEmpty() || currentPages.isEmpty()) {
-                    val oldItems = currentPages.toList()
-                    currentPages.clear()
-                    currentPages.addAll(newItems)
-
-                    // Re-check lifecycle before storage mutation (critical!)
+                if (newItems.isNotEmpty() || viewModel.uiState.value.pages.isEmpty()) {
+                    // Re-check lifecycle before storage operation
                     if (!isAdded) {
-                        Log.w(logTag, "Fragment detached before savePages(), aborting drag persist")
-                        currentPages.clear()
-                        currentPages.addAll(oldItems)
-                        adapter.submitList(currentPages)
+                        Log.w(logTag, "Fragment detached before saveOrder(), aborting drag persist")
                         return@CustomPageItemTouchHelper
                     }
-
-                    if (!savePages(currentPages)) {
-                        Log.e(logTag, "Drag reorder failed: savePages() returned false, ${newItems.size} items attempted, rolling back to ${oldItems.size} items")
-                        currentPages.clear()
-                        currentPages.addAll(oldItems)
-                        adapter.submitList(currentPages)
-                        if (isAdded) {
-                            Toast.makeText(requireContext(), "Failed to save changes", Toast.LENGTH_SHORT).show()
-                        }
-                    }
+                    viewModel.saveOrder(newItems)
                 }
             }
             itemTouchHelper = ItemTouchHelper(touchHelperCallback)
@@ -494,7 +425,7 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
                     addButton.isEnabled = false
                     return
                 }
-                when (val result = validateUrl(text)) {
+                when (val result = validator(text)) {
                     is ValidationResult.Valid -> {
                         statusText.text = "Detected: ${result.label}"
                         labelInput.setText(result.label)
@@ -520,44 +451,43 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
-                adapter.filter(s?.toString() ?: "")
-                updateEmptyState()
+                val query = s?.toString() ?: ""
+                viewModel.filterPages(query)
             }
         })
 
         // Wire up add button
         addButton.setOnClickListener {
-            val result = validateUrl(urlInput.text.toString())
+            val url = urlInput.text.toString()
+            val label = labelInput.text.toString()
+
+            // Only submit if local validation passes (avoids unnecessary async call)
+            val result = validator(url)
             if (result is ValidationResult.Valid) {
-                val label = labelInput.text.toString().ifBlank { result.label }
-                val newPage = CustomPage(result.path, label)
-                if (currentPages.none { it.path == newPage.path }) {
-                    currentPages.add(newPage)
-                    if (!savePages(currentPages)) {
-                        currentPages.removeAt(currentPages.size - 1)
-                        Log.e(logTag, "Add page failed: savePages() returned false for new page '${newPage.label}' (${newPage.path})")
-                        statusText.text = "Failed to save. Please try again."
-                        return@setOnClickListener
-                    }
-                    urlInput.text?.clear()
-                    labelInput.text?.clear()
-                    labelInputLayout.visibility = View.GONE
-                    statusText.text = "Added! Restart app to see changes."
-                    addButton.isEnabled = false
-                    adapter.submitList(currentPages)
-                    updateEmptyState()
-                    // Re-enable focus loop after list changes on TV
-                    if (isTvMode) {
-                        TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
-                    }
-                } else {
-                    statusText.text = "This section already exists"
-                }
+                viewModel.addPage(url, label)
+                // Optimistically clear inputs — Snackbar will show success/error from ViewModel
+                urlInput.text?.clear()
+                labelInput.text?.clear()
+                labelInputLayout.visibility = View.GONE
+                statusText.text = ""
+                addButton.isEnabled = false
             }
         }
 
         // Build view hierarchy
+        // Loading indicator (hidden by default, shown during async operations)
+        progressBar = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            isIndeterminate = true
+            indeterminateTintList = ColorStateList.valueOf(primaryColor)
+            visibility = View.GONE
+        }
+
         mainContainer.addView(title)
+        mainContainer.addView(progressBar)
         mainContainer.addView(card)
         mainContainer.addView(examplesToggle)
         mainContainer.addView(examplesText)
@@ -583,8 +513,8 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
 
         scrollView.addView(mainContainer)
 
-        // Initial list render
-        adapter.submitList(currentPages)
+        // Initial list render (ViewModel will push state via StateFlow)
+        adapter.submitList(emptyList())
         updateEmptyState()
 
         // Enable focus loop on TV (wraps from last to first focusable element)
@@ -604,107 +534,50 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
 
     private fun getReorderSubtitleText(): String {
         return when {
-            isReorderMode && selectedReorderPosition >= 0 -> "Tap destination to move section"
+            isReorderMode && selectedReorderPosition != null -> "Tap destination to move section"
             isReorderMode -> "Tap a section to select, then tap destination"
             isTvMode -> "Tap Reorder to arrange sections"
             else -> "Drag ≡ to reorder"
         }
     }
 
-    private fun toggleReorderMode() {
-        isReorderMode = !isReorderMode
-        selectedReorderPosition = -1
-
-        reorderModeButton?.let { button ->
-            if (isReorderMode) {
-                button.text = "Done"
-                CloudstreamUI.setCompactButtonFilled(button, colors)
-            } else {
-                button.text = "Reorder"
-                CloudstreamUI.setCompactButtonOutlined(button, colors)
-            }
-        }
-
-        reorderSubtitle?.text = getReorderSubtitleText()
-        adapter.setReorderMode(isReorderMode, -1)
-    }
-
     private fun onPageTappedForReorder(position: Int) {
         if (!isReorderMode || !isAdded) return
 
-        val context = requireContext()
+        val currentState = viewModel.uiState.value
+        val currentSelected = currentState.selectedReorderPosition
 
-        if (selectedReorderPosition < 0) {
-            // First tap - select the section
-            selectedReorderPosition = position
-            reorderSubtitle?.text = getReorderSubtitleText()
-            adapter.setReorderMode(true, position)
-            // Restore focus to the tapped item after adapter refresh
+        if (currentSelected == null) {
+            viewModel.selectForReorder(position)
             restoreFocusToPosition(position)
-        } else if (selectedReorderPosition == position) {
-            // Tapped same item - deselect
-            selectedReorderPosition = -1
-            reorderSubtitle?.text = getReorderSubtitleText()
-            adapter.setReorderMode(true, -1)
-            // Restore focus to the tapped item after adapter refresh
+        } else if (currentSelected == position) {
+            viewModel.selectForReorder(null)
             restoreFocusToPosition(position)
         } else {
-            // Second tap - move the section
-            val sourceIdx = adapter.getSourceIndex(selectedReorderPosition)
-            val destIdx = adapter.getSourceIndex(position)
-
-            if (sourceIdx >= 0 && destIdx >= 0) {
-                val movedItem = currentPages.removeAt(sourceIdx)
-                currentPages.add(destIdx, movedItem)
-                if (!savePages(currentPages)) {
-                    currentPages.removeAt(destIdx)
-                    currentPages.add(sourceIdx, movedItem)
-                    Log.e(logTag, "Reorder move failed: savePages() returned false for moving '${movedItem.label}' from $sourceIdx to $destIdx")
-                    if (isAdded) {
-                        Toast.makeText(requireContext(), "Failed to save changes", Toast.LENGTH_SHORT).show()
-                    }
-                }
-                adapter.submitList(currentPages)
-            }
-
-            // Reset selection
-            selectedReorderPosition = -1
-            reorderSubtitle?.text = getReorderSubtitleText()
-            adapter.setReorderMode(true, -1)
-            // Restore focus to the target position after move
+            viewModel.reorderPages(currentSelected, position)
             restoreFocusToPosition(position)
-
-            if (isTvMode) {
-                TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
-            }
         }
     }
 
     private fun restoreFocusToPosition(position: Int) {
         sectionsRecyclerView.post {
             if (!isAdded) {
-                android.util.Log.d(logTag, "restoreFocusToPosition: fragment not added, skipping")
+                Log.d(logTag, "restoreFocusToPosition: fragment not added, skipping")
                 return@post
             }
             val viewHolder = sectionsRecyclerView.findViewHolderForAdapterPosition(position)
             if (viewHolder == null) {
-                android.util.Log.d(logTag, "restoreFocusToPosition: no ViewHolder at position $position")
+                Log.d(logTag, "restoreFocusToPosition: no ViewHolder at position $position")
                 return@post
             }
             if (!viewHolder.itemView.requestFocus()) {
-                android.util.Log.d(logTag, "restoreFocusToPosition: requestFocus() failed for position $position")
+                Log.d(logTag, "restoreFocusToPosition: requestFocus() failed for position $position")
             }
         }
     }
 
     /**
      * Show confirmation dialog before resetting all data.
-     *
-     * On confirmation, performs:
-     * - Lifecycle safety checks (fragment may detach while dialog is open)
-     * - Backup and rollback on storage failure
-     * - UI state reset (adapter, empty state, reorder mode)
-     * - TV focus restoration after list changes
      */
     private fun showResetConfirmation() {
         if (!isAdded) return
@@ -713,85 +586,111 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
             .setTitle("Reset All Data")
             .setMessage("This will permanently delete all your custom sections. This cannot be undone. Are you sure?")
             .setPositiveButton("Reset") { _, _ ->
-                // Lifecycle safety: User may navigate away while dialog is open,
-                // causing fragment to detach. Without this check, Toast/UI operations
-                // would crash with IllegalStateException: Fragment not attached to a context.
                 if (!isAdded) return@setPositiveButton
-
-                // Create backup for rollback if clearPages() fails.
-                // Critical: Without rollback, UI would show empty list while storage still has data,
-                // creating inconsistency that persists until app restart.
-                val oldPages = currentPages.toList()
-
-                // Prevent storage mutation if fragment is detaching
-                if (!isAdded) {
-                    Log.w(logTag, "Fragment detached before clearPages(), aborting reset")
-                    return@setPositiveButton
-                }
-
-                if (clearPages()) {
-                    // Success: Clear in-memory state and update UI
-                    currentPages.clear()
-                    adapter.submitList(emptyList())
-                    updateEmptyState()
-
-                    // Reorder mode becomes invalid when list is empty (no items to select/move).
-                    // Reset to default state to prevent UI inconsistencies.
-                    if (isTvMode && isReorderMode) {
-                        isReorderMode = false
-                        selectedReorderPosition = -1
-                        adapter.setReorderMode(false, -1)
-                        reorderModeButton?.let { button ->
-                            button.text = "Reorder"
-                            CloudstreamUI.setCompactButtonOutlined(button, colors)
-                        }
-                        reorderSubtitle?.text = getReorderSubtitleText()
-                    }
-
-                    // Focus loop must be reconfigured after RecyclerView content changes
-                    if (isTvMode) {
-                        TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
-                    }
-
-                    if (isAdded) {
-                        Toast.makeText(
-                            requireContext(),
-                            "All data reset successfully",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                } else {
-                    // Failure: Restore in-memory state from backup to maintain UI/storage consistency.
-                    Log.e(logTag, "Reset All Data failed: clearPages() returned false")
-
-                    // Use clear() + addAll() to preserve the existing MutableList reference
-                    // (adapter and other code may hold references to currentPages).
-                    currentPages.clear()
-                    currentPages.addAll(oldPages)
-                    adapter.submitList(currentPages)
-                    updateEmptyState()
-
-                    // Restore reorder mode state if it was active
-                    if (isTvMode && isReorderMode) {
-                        adapter.setReorderMode(isReorderMode, selectedReorderPosition)
-                    }
-
-                    // Re-enable focus loop on TV
-                    if (isTvMode) {
-                        TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
-                    }
-
-                    if (isAdded) {
-                        Toast.makeText(
-                            requireContext(),
-                            "Failed to clear data. Please try again.",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                }
+                viewModel.clearAll()
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /**
+     * Update UI based on ViewModel state.
+     * Called when ViewModel StateFlow emits new state.
+     */
+    private fun updateUIFromState(state: BaseCustomPagesViewModel.SettingsUiState) {
+        // Show/hide loading indicator
+        if (::progressBar.isInitialized) {
+            progressBar.visibility = if (state.isLoading) View.VISIBLE else View.GONE
+        }
+
+        // Update adapter with filtered pages
+        if (::adapter.isInitialized) {
+            adapter.submitList(state.filteredPages)
+            updateEmptyState()
+        }
+
+        // Handle reorder mode (TV only)
+        if (isTvMode && ::adapter.isInitialized) {
+            val wasReorderMode = isReorderMode
+            isReorderMode = state.isReorderMode
+            selectedReorderPosition = state.selectedReorderPosition
+
+            // Update reorder button
+            reorderModeButton?.let { button ->
+                if (state.isReorderMode) {
+                    button.text = "Done"
+                    CloudstreamUI.setCompactButtonFilled(button, colors)
+                } else {
+                    button.text = "Reorder"
+                    CloudstreamUI.setCompactButtonOutlined(button, colors)
+                }
+            }
+
+            // Update subtitle
+            reorderSubtitle?.text = getReorderSubtitleText()
+
+            // Update adapter mode
+            adapter.setReorderMode(state.isReorderMode, state.selectedReorderPosition ?: -1)
+
+            // Re-enable focus loop if reorder mode changed
+            if (wasReorderMode != state.isReorderMode && ::sectionsRecyclerView.isInitialized) {
+                TvFocusUtils.enableFocusLoopWithRecyclerView(mainContainer, sectionsRecyclerView)
+            }
+        }
+
+        // Handle save status (one-time events)
+        when (val status = state.saveStatus) {
+            is BaseCustomPagesViewModel.SaveStatus.Success -> {
+                showSnackbar(status.message)
+                viewModel.clearSaveStatus()
+            }
+            is BaseCustomPagesViewModel.SaveStatus.Deleted -> {
+                showSnackbar(status.message, actionLabel = "Undo") {
+                    viewModel.undoDelete(status.deletedPage, status.sourceIndex)
+                }
+                viewModel.clearSaveStatus()
+            }
+            is BaseCustomPagesViewModel.SaveStatus.Error -> {
+                showSnackbar(status.message, isError = true)
+                viewModel.clearSaveStatus()
+            }
+            BaseCustomPagesViewModel.SaveStatus.Idle -> {
+                // No action needed
+            }
+        }
+    }
+
+    /**
+     * Show a Snackbar anchored to the dialog content. Falls back to Toast on TV.
+     * On TV, undo actions are not available (Toast cannot carry actions) — a confirmation
+     * dialog should be used for destructive operations where undo is critical.
+     */
+    private fun showSnackbar(
+        message: String,
+        isError: Boolean = false,
+        actionLabel: String? = null,
+        onAction: (() -> Unit)? = null
+    ) {
+        if (!isAdded) return
+
+        // On TV, use Toast (Snackbar doesn't work well with D-pad).
+        // Undo actions are lost — this is a known limitation.
+        if (isTvMode) {
+            val tvMessage = if (actionLabel != null) "$message (${actionLabel} not available on TV)" else message
+            Toast.makeText(requireContext(), tvMessage, if (isError) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val anchorView = dialog?.window?.decorView?.findViewById<View>(android.R.id.content)
+            ?: mainContainer
+        val snackbar = Snackbar.make(anchorView, message, Snackbar.LENGTH_LONG)
+        snackbar.setBackgroundTint(if (isError) colors.error else colors.card)
+        snackbar.setTextColor(colors.text)
+        if (actionLabel != null && onAction != null) {
+            snackbar.setActionTextColor(colors.primary)
+            snackbar.setAction(actionLabel) { onAction() }
+        }
+        snackbar.show()
     }
 
     private fun dp(context: Context, dp: Int): Int = TvFocusUtils.dpToPx(context, dp)
@@ -805,5 +704,7 @@ abstract class BaseCustomPagesSettingsFragment : DialogFragment() {
         if (::sectionsRecyclerView.isInitialized) {
             sectionsRecyclerView.adapter = null
         }
+        // Clear ViewModel coroutines since we're not using ViewModelProvider
+        viewModel.onCleared()
     }
 }

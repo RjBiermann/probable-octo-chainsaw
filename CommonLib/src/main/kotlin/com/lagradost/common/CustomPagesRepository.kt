@@ -2,6 +2,8 @@ package com.lagradost.common
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Repository interface for custom pages storage operations.
@@ -28,14 +30,39 @@ interface CustomPagesRepository {
 }
 
 /**
+ * Suspend-based repository interface for coroutine-native storage operations.
+ * Preferred over [CustomPagesRepository] in use cases and ViewModels.
+ */
+interface SuspendCustomPagesRepository {
+    suspend fun load(): List<CustomPage>
+    suspend fun save(pages: List<CustomPage>): Boolean
+}
+
+/**
+ * Adapts a synchronous [CustomPagesRepository] to [SuspendCustomPagesRepository]
+ * by running operations on [Dispatchers.IO].
+ */
+class SuspendRepositoryAdapter(
+    private val delegate: CustomPagesRepository
+) : SuspendCustomPagesRepository {
+    override suspend fun load(): List<CustomPage> = withContext(Dispatchers.IO) {
+        delegate.load()
+    }
+
+    override suspend fun save(pages: List<CustomPage>): Boolean = withContext(Dispatchers.IO) {
+        delegate.save(pages)
+    }
+}
+
+/**
  * Type alias for the getKey function from AcraApplication.
- * Signature: fun <T> getKey(key: String): T?
+ * Narrowed from AcraApplication's generic `getKey<T>(key: String): T?` to String-only for JSON storage.
  */
 typealias GetKeyFunction = (key: String) -> String?
 
 /**
  * Type alias for the setKey function from AcraApplication.
- * Signature: fun setKey(key: String, value: Any?)
+ * Narrowed from AcraApplication's generic `setKey(key: String, value: Any?)` to String-only for JSON storage.
  */
 typealias SetKeyFunction = (key: String, value: String?) -> Unit
 
@@ -72,39 +99,31 @@ class GlobalStorageCustomPagesRepository(
     /**
      * Load pages from global storage.
      * Note: For migration from legacy storage, use loadWithMigration() instead.
+     *
+     * @throws Exception if storage is corrupted or cannot be read,
+     *   so callers can distinguish "no data" from "load failed"
      */
     override fun load(): List<CustomPage> {
-        return try {
-            val json = getKey(storageKey)
-            if (json != null) {
-                CustomPage.listFromJson(json)
-            } else {
-                emptyList()
-            }
-        } catch (e: Exception) {
-            Log.e(tag, "Failed to load custom pages (${e.javaClass.simpleName})", e)
-            emptyList()
-        }
+        val json = getKey(storageKey) ?: return emptyList()
+        return CustomPage.listFromJson(json)
     }
 
     /**
      * Load pages with context for legacy migration.
      * Call this during plugin initialization to ensure migration happens.
+     *
+     * @throws Exception if storage is corrupted or cannot be read,
+     *   so callers can distinguish "no data" from "migration failed"
      */
     fun loadWithMigration(context: Context): List<CustomPage> {
-        return try {
-            // Try global storage first
-            val json = getKey(storageKey)
-            if (json != null) {
-                return CustomPage.listFromJson(json)
-            }
-
-            // Fallback: Check legacy SharedPreferences and migrate
-            migrateFromLegacy(context)
-        } catch (e: Exception) {
-            Log.e(tag, "Failed to load custom pages during migration (${e.javaClass.simpleName})", e)
-            emptyList()
+        // Try global storage first
+        val json = getKey(storageKey)
+        if (json != null) {
+            return CustomPage.listFromJson(json)
         }
+
+        // Fallback: Check legacy SharedPreferences and migrate
+        return migrateFromLegacy(context)
     }
 
     override fun save(pages: List<CustomPage>): Boolean {
@@ -162,6 +181,26 @@ class InMemoryCustomPagesRepository : CustomPagesRepository {
     }
 
     /** Set initial data for testing */
+    fun setInitialData(pages: List<CustomPage>) {
+        this.pages = pages
+    }
+}
+
+/**
+ * In-memory suspend repository for testing.
+ */
+class InMemorySuspendRepository : SuspendCustomPagesRepository {
+    private var pages: List<CustomPage> = emptyList()
+    var saveFailure: Boolean = false
+
+    override suspend fun load(): List<CustomPage> = pages
+
+    override suspend fun save(pages: List<CustomPage>): Boolean {
+        if (saveFailure) return false
+        this.pages = pages
+        return true
+    }
+
     fun setInitialData(pages: List<CustomPage>) {
         this.pages = pages
     }

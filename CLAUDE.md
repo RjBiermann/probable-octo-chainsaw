@@ -2,6 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Architecture Overview
+
+12 of 13 plugins use **Clean Architecture** with ViewModel + StateFlow (NsfwUltima has a standalone settings UI):
+
+```
+Fragment (UI) → ViewModel (state) → Use Cases (business logic) → Repository (storage)
+```
+
+**Key layers**:
+- **Fragment** (`BaseCustomPagesSettingsFragment`) - Observes ViewModel StateFlow, renders UI
+- **ViewModel** (`BaseCustomPagesViewModel`) - Owns UI state, coordinates use cases
+- **Use Cases** (`CustomPagesCrudUseCases`, `CustomPagesOrderUseCases`) - Single-responsibility operations
+- **Repository** (`CustomPagesRepository` / `SuspendCustomPagesRepository`) - Storage abstraction
+- **Factory** (`CustomPagesViewModelFactory`) - Centralizes ViewModel creation, eliminates per-plugin boilerplate
+
+**UI enhancements**:
+- Snackbar with undo for delete operations (Toast fallback on TV)
+- ProgressBar loading indicator during async operations
+- Reactive StateFlow updates for all UI state
+
+**Reference**: [Neporn plugin](Neporn/src/main/kotlin/com/lagradost/) is the canonical implementation example.
+
 ## Cloudstream App Reference
 
 Before implementing features or investigating APIs, **always read** the Cloudstream app's CLAUDE.md at `../cloudstream/CLAUDE.md` for up-to-date guidance on core APIs, data structures, and patterns.
@@ -65,14 +87,15 @@ PluginName/
     ├── main/kotlin/com/lagradost/
     │   ├── *Plugin.kt        # Entry point (@CloudstreamPlugin) - loads settings, registers MainAPI
     │   ├── *.kt              # MainAPI subclass - implements search, load, loadLinks
-    │   ├── *SettingsFragment.kt  # Programmatic Material UI (no XML layouts)
+    │   ├── *SettingsFragment.kt  # Settings UI (extends BaseCustomPagesSettingsFragment)
     │   ├── *UrlValidator.kt  # Object singleton for URL parsing/validation
     │   └── *Extractor.kt     # (Optional) ExtractorApi for external video hosts
     └── test/kotlin/
-        └── *UrlValidatorTest.kt  # Unit tests for URL validation
+        ├── *UrlValidatorTest.kt          # URL validation tests
+        └── *SettingsViewModelTest.kt     # ViewModel CRUD/state tests
 ```
 
-Shared utilities (ValidationResult, CustomPage, CustomPagesAdapter, TvFocusUtils) are imported from CommonLib—see [CommonLib Shared Module](#commonlib-shared-module).
+ViewModels are created via `CustomPagesViewModelFactory` in each Fragment — no per-plugin ViewModel classes needed. Shared utilities are imported from CommonLib—see [CommonLib Shared Module](#commonlib-shared-module).
 
 ### MainAPI Implementation
 
@@ -106,129 +129,9 @@ All settings UIs are built programmatically (no XML) using Material components:
 - `RecyclerView` with `ItemTouchHelper` for drag-reorder (touch mode only)
 - Theme colors resolved at runtime from Cloudstream attributes with Android fallbacks
 
-**Storage error handling:** Storage save methods should return `Boolean` success/failure. Callers must check the return value and show user feedback (Toast) on failure. Never silently ignore save failures.
+**ViewModel pattern:** All CRUD and error handling is managed by `BaseCustomPagesViewModel`. The Fragment only observes `StateFlow` and delegates user actions to the ViewModel. Error recovery (rollback, user feedback via Snackbar) is handled automatically.
 
-**Error logging with context:** Always log storage failures with operation context for debugging:
-```kotlin
-if (!savePages(newPages)) {
-    Log.e(tag, "addPage failed: savePages() returned false for '${page.label}'")
-    // User feedback
-}
-```
-
-**Complete error recovery pattern:** On storage failures, restore ALL UI state, not just data:
-```kotlin
-val oldData = currentData.toList()  // Backup before mutation
-if (!saveData(newData)) {
-    // Restore data
-    currentData.clear()
-    currentData.addAll(oldData)
-    adapter.submitList(currentData)
-    // Restore UI state
-    updateEmptyState()
-    if (isTvMode) {
-        restoreReorderMode()  // if applicable
-        TvFocusUtils.enableFocusLoopWithRecyclerView(container, recyclerView)
-    }
-    // Log with context
-    Log.e(tag, "OperationName failed: saveData() returned false")
-    // User feedback
-    Toast.makeText(requireContext(), "Failed message", Toast.LENGTH_LONG).show()
-}
-```
-
-**Dialog callbacks:** When dialogs modify data and call parent callbacks (e.g., `onGroupsChanged`), the parent must call UI refresh methods (e.g., `refreshGroupedView()`) to update the display. Changes won't reflect automatically.
-
-**Async callback lifecycle safety:** Callbacks from AlertDialogs, confirmation dialogs, or any async operations must check `if (!isAdded) return@callback` at the start. The fragment may detach while the dialog is open.
-
-**CRITICAL: Never capture context parameters in callbacks.** Methods that take `context: Context` and pass it to callbacks create stale context crashes:
-```kotlin
-// ❌ WRONG - Captured context becomes stale
-fun createView(context: Context) {
-    button.setOnClickListener {
-        showDialog(context)  // CRASH if fragment detached
-        Toast.makeText(context, ...).show()  // CRASH
-    }
-}
-
-// ✓ CORRECT - Fresh context after lifecycle check
-fun createView(context: Context) {
-    button.setOnClickListener {
-        if (!isAdded) return@setOnClickListener
-        showDialog()  // Method uses requireContext() internally
-        Toast.makeText(requireContext(), ...).show()
-    }
-}
-```
-
-**Pattern:** Methods called from callbacks should not take `context` parameters. Instead, check `isAdded` internally and call `requireContext()` when needed.
-
-**Double lifecycle checks for storage mutations:** In async dialog callbacks, check `isAdded` twice - once at callback start, again immediately before storage mutation:
-```kotlin
-.setPositiveButton("Delete") { _, _ ->
-    if (!isAdded) return@setPositiveButton  // First check
-    val backup = data.toList()
-    if (!isAdded) {  // Second check before mutation
-        Log.w(tag, "Fragment detached before storage mutation, aborting")
-        return@setPositiveButton
-    }
-    if (clearStorage()) { /* success */ } else { /* restore from backup */ }
-}
-```
-
-**Re-check lifecycle after async operations:** Repository operations and use cases can take time. Re-check `isAdded` before UI operations:
-```kotlin
-onSave = { data ->
-    if (!isAdded) return@onSave  // Initial check
-
-    // Repository operations (can take time - fragment may detach)
-    val saved = repository.save(data)
-
-    // Re-check before UI updates
-    if (!isAdded) return@onSave
-    refreshUI()
-    Toast.makeText(requireContext(), "Saved", Toast.LENGTH_SHORT).show()
-}
-```
-
-**Never create dummy objects on lifecycle failure:** When lifecycle checks fail, return early - don't create fallback UI objects:
-```kotlin
-// ❌ WRONG - requireContext() crashes if !isAdded
-private fun createChip(): Chip {
-    if (!isAdded) return Chip(requireContext())  // CRASH!
-    return Chip(requireContext()).apply { /* config */ }
-}
-
-// ✓ CORRECT - Caller checks lifecycle
-private fun createChip(): Chip {
-    return Chip(requireContext()).apply { /* config */ }
-}
-
-// Caller's responsibility to check before calling
-private fun rebuildUI() {
-    if (!isAdded) return  // Safe - createChip() won't be called
-    chips.forEach { container.addView(createChip()) }
-}
-```
-
-**Documentation for complex methods:** Use KDoc for method contracts, inline comments for WHY (not WHAT):
-```kotlin
-/**
- * Clear all data. Handles lifecycle safety, backup/rollback, UI state reset, and TV focus.
- */
-private fun clearAll() {
-    if (!isAdded) return
-
-    // Lifecycle safety: User may navigate away while dialog is open,
-    // causing fragment to detach. Without this check, Toast/UI operations
-    // would crash with IllegalStateException.
-    if (!isAdded) return@callback
-
-    // Reorder mode becomes invalid when list is empty (no items to select/move).
-    // Reset to default state to prevent UI inconsistencies.
-    if (isTvMode && isReorderMode) { resetReorderMode() }
-}
-```
+**Lifecycle safety:** Check `if (!isAdded) return` before any UI operations in callbacks. Never capture `context: Context` parameters in lambdas — use `requireContext()` after lifecycle check instead.
 
 ### TV Mode Support
 
@@ -252,6 +155,8 @@ if (!view.requestFocus()) {
 
 **Adapter tagging:** In RecyclerView adapters, add `holder.itemView.tag = item.key()` in bind methods (`bindFeed`, `bindGroup`) so parent dialogs can locate items by key after `submitList()` or `notifyDataSetChanged()`.
 
+**NestedScrollView crash on TV:** AndroidX `NestedScrollView` has a bug where `onSizeChanged()` calls `offsetDescendantRectToMyCoords` on a RecyclerView item that was recycled during the same layout pass, causing `IllegalArgumentException: parameter must be a descendant of this view`. **Always use `SafeNestedScrollView`** (from CommonLib) instead of `NestedScrollView` in any dialog/fragment containing a RecyclerView.
+
 **Dialog initial focus:** All dialogs need `onStart()` override:
 ```kotlin
 override fun onStart() {
@@ -269,16 +174,28 @@ override fun onStart() {
 ### CommonLib Shared Module
 
 Shared utilities live in `CommonLib/src/main/kotlin/com/lagradost/common/`:
-- `ValidationResult.kt` - Sealed class: Valid(path, label), InvalidDomain, InvalidPath
-- `CustomPage.kt` - Data class with JSON serialization (robust error handling)
-- `CustomPagesRepository.kt` - Repository pattern interface and implementations for custom pages storage
+
+**Architecture layer:**
+- `BaseCustomPagesViewModel.kt` - Abstract ViewModel with CRUD, undo, filtering, reorder state
+- `CustomPagesViewModelFactory.kt` - Factory + concrete ViewModel class (eliminates per-plugin boilerplate)
+- `CustomPagesRepository.kt` - Repository interfaces (`CustomPagesRepository`, `SuspendCustomPagesRepository`), `SuspendRepositoryAdapter`, and implementations
+- `architecture/PluginViewModel.kt` - Lifecycle-aware base ViewModel with coroutine scope
+- `architecture/CoroutineUtils.kt` - Safe API calls with retry logic
+- `architecture/usecases/CustomPagesCrudUseCases.kt` - Add, delete, load, clear operations
+- `architecture/usecases/CustomPagesOrderUseCases.kt` - Reorder, save order operations
+
+**UI layer:**
+- `BaseCustomPagesSettingsFragment.kt` - Abstract Fragment observing ViewModel StateFlow
 - `CustomPagesAdapter.kt` - RecyclerView adapter for custom pages list
 - `CustomPageItemTouchHelper.kt` - Drag-and-drop support for touch mode
-- `BaseCustomPagesSettingsFragment.kt` - Abstract base class for plugin settings dialogs
-- `TvFocusUtils.kt` - Android TV detection and D-pad navigation helpers
-- `DialogUtils.kt` - Theme color resolution, TV/BottomSheet dialog factory, and `showDeleteConfirmation()` for delete actions
+- `SafeNestedScrollView.kt` - NestedScrollView subclass that catches TV focus crash (see below)
 - `CloudstreamUI.kt` - Cloudstream-themed UI component library (chips, buttons, cards, badges)
-- `CloudstreamUIExamples.kt` - Usage examples for CloudstreamUI components
+- `DialogUtils.kt` - Theme color resolution, TV/BottomSheet dialog factory
+- `TvFocusUtils.kt` - Android TV detection and D-pad navigation helpers
+
+**Data & utilities:**
+- `ValidationResult.kt` - Sealed class: Valid(path, label), InvalidDomain, InvalidPath
+- `CustomPage.kt` - Data class with JSON serialization (robust error handling)
 - `StringUtils.kt` - URL slug processing and text formatting utilities
 - `DurationUtils.kt` - Video duration parsing from various formats
 - `PaginationUtils.kt` - Pagination strategy utilities for MainAPI implementations
@@ -400,7 +317,8 @@ When copying vector drawables from Cloudstream, replace `?attr/white` with `@and
 3. Add CommonLib dependency: `implementation(project(":CommonLib"))`
 4. Add Material dependency if using settings UI: `implementation("com.google.android.material:material:1.13.0")`
 5. Create source files in `com.lagradost` package (import shared utilities from `com.lagradost.common`)
-6. Plugin is auto-discovered by `settings.gradle.kts`
+6. For settings UI, create a Fragment extending `BaseCustomPagesSettingsFragment` with a ViewModel from `CustomPagesViewModelFactory.create()` — see [Neporn](Neporn/src/main/kotlin/com/lagradost/NepornSettingsFragment.kt) for the minimal pattern
+7. Plugin is auto-discovered by `settings.gradle.kts`
 
 ## Dependencies
 
@@ -425,7 +343,10 @@ D8 warnings like "error parsing kotlin metadata" indicate AGP/Kotlin version mis
 
 ## Testing
 
-Tests focus on URL validation (pure Kotlin, no Android deps). `unitTests.isReturnDefaultValues = true` in build config allows mocking Android's `Log` class.
+Tests cover URL validation, ViewModel CRUD/state management, use cases, and repository adapters (pure Kotlin, no Android deps). `unitTests.isReturnDefaultValues = true` in build config allows mocking Android's `Log` class.
+
+Test files per plugin: `*UrlValidatorTest.kt` (URL parsing) and `*SettingsViewModelTest.kt` (ViewModel operations via factory).
+CommonLib tests: `BaseCustomPagesViewModelTest`, `CustomPagesCrudUseCasesTest`, `CustomPagesOrderUseCasesTest`, `SuspendRepositoryAdapterTest`, `CustomPagesViewModelFactoryTest`, `PluginViewModelTest`, `CoroutineUtilsTest`.
 
 ## Troubleshooting
 

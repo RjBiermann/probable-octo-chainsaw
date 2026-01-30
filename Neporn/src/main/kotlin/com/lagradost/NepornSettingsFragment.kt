@@ -1,6 +1,7 @@
 package com.lagradost
 
 import com.lagradost.common.BaseCustomPagesSettingsFragment
+import com.lagradost.common.CustomPagesViewModelFactory
 import com.lagradost.common.ValidationResult
 
 class NepornSettingsFragment : BaseCustomPagesSettingsFragment() {
@@ -20,7 +21,11 @@ class NepornSettingsFragment : BaseCustomPagesSettingsFragment() {
 
     override val logTag = "NepornSettings"
 
-    override val repository = NepornPlugin.createRepository(logTag)
+    override val validator: (String) -> ValidationResult = NepornUrlValidator::validate
 
-    override fun validateUrl(url: String): ValidationResult = NepornUrlValidator.validate(url)
+    override val viewModel = CustomPagesViewModelFactory.create(
+        repository = NepornPlugin.createRepository("NepornVM"),
+        validator = validator,
+        logTag = "NepornVM"
+    )
 }

@@ -16,7 +16,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.widget.NestedScrollView
+import com.lagradost.common.SafeNestedScrollView
 import androidx.fragment.app.DialogFragment
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.Chip
@@ -104,7 +104,7 @@ class HomepageEditorDialog(
 
     private fun createDialogView(): View {
         val context = requireContext()
-        val scrollView = NestedScrollView(context).apply {
+        val scrollView = SafeNestedScrollView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT

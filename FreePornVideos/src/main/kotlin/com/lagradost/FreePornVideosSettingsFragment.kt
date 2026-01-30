@@ -1,6 +1,7 @@
 package com.lagradost
 
 import com.lagradost.common.BaseCustomPagesSettingsFragment
+import com.lagradost.common.CustomPagesViewModelFactory
 import com.lagradost.common.ValidationResult
 
 class FreePornVideosSettingsFragment : BaseCustomPagesSettingsFragment() {
@@ -21,7 +22,11 @@ class FreePornVideosSettingsFragment : BaseCustomPagesSettingsFragment() {
 
     override val logTag = "FreePornVideosSettings"
 
-    override val repository = FreePornVideosPlugin.createRepository(logTag)
+    override val validator: (String) -> ValidationResult = FreePornVideosUrlValidator::validate
 
-    override fun validateUrl(url: String): ValidationResult = FreePornVideosUrlValidator.validate(url)
+    override val viewModel = CustomPagesViewModelFactory.create(
+        repository = FreePornVideosPlugin.createRepository("FreePornVideosVM"),
+        validator = validator,
+        logTag = "FreePornVideosVM"
+    )
 }

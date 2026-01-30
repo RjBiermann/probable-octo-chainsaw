@@ -570,10 +570,12 @@ object CloudstreamUI {
             isClickable = true
             isFocusable = true
 
-            // Add ripple via foreground
-            val typedValue = TypedValue()
-            context.theme.resolveAttribute(android.R.attr.selectableItemBackground, typedValue, true)
-            foreground = androidx.core.content.ContextCompat.getDrawable(context, typedValue.resourceId)
+            // Add ripple via foreground (API 23+)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                val typedValue = TypedValue()
+                context.theme.resolveAttribute(android.R.attr.selectableItemBackground, typedValue, true)
+                foreground = androidx.core.content.ContextCompat.getDrawable(context, typedValue.resourceId)
+            }
 
             onClick?.let { setOnClickListener { it() } }
 

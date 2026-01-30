@@ -101,10 +101,18 @@ subprojects {
         implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
         implementation("me.xdrop:fuzzywuzzy:1.4.0")
 
+        // Lifecycle dependencies for ViewModel support (lightweight, no Compose needed)
+        implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
+        implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+
         // Test dependencies
         testImplementation("junit:junit:4.13.2")
         testImplementation("org.jetbrains.kotlin:kotlin-test:2.3.0")
         testImplementation("io.mockk:mockk:1.14.7")
+        // Coroutine testing utilities
+        testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")
+        // LiveData/ViewModel testing utilities
+        testImplementation("androidx.arch.core:core-testing:2.2.0")
     }
 
     // Auto-configure CommonLib class bundling for plugins that depend on it
