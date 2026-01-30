@@ -112,14 +112,38 @@ jobs:
         with:
           path: "src"
           ref: ${{ github.ref }}  # Branch HEAD, includes bump commit if pushed
+          fetch-depth: 2  # Need parent commit for diff
+
+      - name: Check for source changes
+        id: changes
+        working-directory: src
+        run: |
+          # Compare against parent commit to detect if plugin source changed
+          # Fail-open: if diff fails (no parent, shallow clone), assume source changes
+          diff_err=$(mktemp)
+          changed_files=$(git diff --name-only HEAD~1 HEAD 2>"$diff_err") || {
+            echo "::warning::Could not diff against parent commit, assuming source changes: $(cat "$diff_err")"
+            rm -f "$diff_err"
+            echo "has_source=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          rm -f "$diff_err"
+          if echo "$changed_files" | grep -qvE '^\.github/|\.md$|^LICENSE$'; then
+            echo "has_source=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_source=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping build — no plugin source changes detected"
+          fi
 
       - name: Checkout builds
+        if: steps.changes.outputs.has_source == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: "builds"
           path: "builds"
 
       - name: Clean old builds
+        if: steps.changes.outputs.has_source == 'true'
         run: |
           shopt -s nullglob
           cs3_files=("$GITHUB_WORKSPACE"/builds/*.cs3)
@@ -134,6 +158,7 @@ jobs:
           fi
 
       - name: Setup JDK 17
+        if: steps.changes.outputs.has_source == 'true'
         uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: "adopt"
@@ -141,19 +166,24 @@ jobs:
           cache: "gradle"
 
       - name: Setup Android SDK
+        if: steps.changes.outputs.has_source == 'true'
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
 
       - name: Build Plugins
+        if: steps.changes.outputs.has_source == 'true'
         working-directory: src
         run: .github/scripts/build-plugins.sh "$GITHUB_WORKSPACE/builds"
 
       - name: Push builds
+        if: steps.changes.outputs.has_source == 'true'
         run: src/.github/scripts/push-builds.sh "$GITHUB_WORKSPACE/builds" "$GITHUB_SHA"
 
       - name: Summary
         if: always()
         run: |
-          if [[ "${{ job.status }}" == "success" ]]; then
+          if [[ "${{ steps.changes.outputs.has_source }}" != "true" ]]; then
+            echo "## Build: Skipped (no source changes) :white_circle:" >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "${{ job.status }}" == "success" ]]; then
             {
               echo "## Build: Success :white_check_mark:"
               shopt -s nullglob
