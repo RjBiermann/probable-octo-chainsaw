@@ -98,7 +98,7 @@ subprojects {
         implementation("com.github.Blatzar:NiceHttp:0.4.16") // HTTP Lib
         implementation("org.jsoup:jsoup:1.22.1") // HTML Parser
 
-        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
         implementation("me.xdrop:fuzzywuzzy:1.4.0")
 
         // Lifecycle dependencies for ViewModel support (lightweight, no Compose needed)
@@ -110,7 +110,7 @@ subprojects {
         testImplementation("org.jetbrains.kotlin:kotlin-test:2.3.0")
         testImplementation("io.mockk:mockk:1.14.7")
         // Coroutine testing utilities
-        testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")
+        testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
         // LiveData/ViewModel testing utilities
         testImplementation("androidx.arch.core:core-testing:2.2.0")
     }
