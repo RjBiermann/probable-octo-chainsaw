@@ -111,7 +111,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           path: "src"
-          ref: ${{ github.ref }}  # Branch HEAD, includes bump commit if pushed
+          ref: ${{ github.ref }}  # Branch HEAD at checkout time; includes bump commit if pushed by prior job
           fetch-depth: 2  # Need parent commit for diff
 
       - name: Check for source changes
@@ -128,7 +128,7 @@ jobs:
             exit 0
           }
           rm -f "$diff_err"
-          if echo "$changed_files" | grep -qvE '^\.github/|\.md$|^LICENSE$'; then
+          if echo "$changed_files" | grep -v '^$' | grep -qvE '^\.github/|\.md$|^LICENSE$'; then
             echo "has_source=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_source=false" >> "$GITHUB_OUTPUT"

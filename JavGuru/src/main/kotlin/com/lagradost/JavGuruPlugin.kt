@@ -7,6 +7,8 @@ import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.common.GlobalStorageCustomPagesRepository
+import com.lagradost.common.PluginBootstrap
+import com.lagradost.common.cache.SharedHttpPool
 
 @CloudstreamPlugin
 class JavGuruPlugin : Plugin() {
@@ -34,7 +36,9 @@ class JavGuruPlugin : Plugin() {
             }
         }
 
-        registerMainAPI(JavGuru(customPages))
+        val bootstrap = PluginBootstrap.create(context, "JavGuru", { key -> getKey(key) }, { key, value -> setKey(key, value) })
+
+        registerMainAPI(JavGuru(customPages, bootstrap.cachedClient, bootstrap.appContext, bootstrap.watchHistoryConfig))
 
         // Register custom extractors not built into Cloudstream
         registerExtractorAPI(DoodStream())
@@ -54,5 +58,8 @@ class JavGuruPlugin : Plugin() {
         registerExtractorAPI(Advertape())
         registerExtractorAPI(Javlesbians())
         registerExtractorAPI(Lauradaydo())
+    }
+    override fun beforeUnload() {
+        SharedHttpPool.releaseClient("JavGuru")
     }
 }

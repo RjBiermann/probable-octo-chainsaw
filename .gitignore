@@ -11,3 +11,9 @@
 local.properties
 .vscode
 .claude
+
+node_modules
+package.json
+package-lock.json
+scripts/
+docs/

@@ -7,6 +7,8 @@ import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.common.GlobalStorageCustomPagesRepository
+import com.lagradost.common.PluginBootstrap
+import com.lagradost.common.cache.SharedHttpPool
 
 @CloudstreamPlugin
 class SevenMmTvPlugin : Plugin() {
@@ -35,9 +37,14 @@ class SevenMmTvPlugin : Plugin() {
             }
         }
 
-        registerMainAPI(SevenMmTv(customPages))
+        val bootstrap = PluginBootstrap.create(context, "SevenMmTv", { key -> getKey(key) }, { key, value -> setKey(key, value) })
+
+        registerMainAPI(SevenMmTv(customPages, bootstrap.cachedClient, bootstrap.appContext, bootstrap.watchHistoryConfig))
         registerExtractorAPI(TapeWithAdBlock())
         registerExtractorAPI(Mmsi01())
         registerExtractorAPI(Mmvh01())
+    }
+    override fun beforeUnload() {
+        SharedHttpPool.releaseClient("SevenMmTv")
     }
 }

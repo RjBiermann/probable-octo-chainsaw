@@ -7,6 +7,8 @@ import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.common.GlobalStorageCustomPagesRepository
+import com.lagradost.common.PluginBootstrap
+import com.lagradost.common.cache.SharedHttpPool
 
 @CloudstreamPlugin
 class PornXpPlugin : Plugin() {
@@ -35,6 +37,11 @@ class PornXpPlugin : Plugin() {
             }
         }
 
-        registerMainAPI(PornXp(customPages))
+        val bootstrap = PluginBootstrap.create(context, "PornXp", { key -> getKey(key) }, { key, value -> setKey(key, value) })
+
+        registerMainAPI(PornXp(customPages, bootstrap.cachedClient, bootstrap.appContext, bootstrap.watchHistoryConfig))
+    }
+    override fun beforeUnload() {
+        SharedHttpPool.releaseClient("PornXp")
     }
 }

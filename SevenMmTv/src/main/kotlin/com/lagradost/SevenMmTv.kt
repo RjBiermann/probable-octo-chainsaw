@@ -1,8 +1,14 @@
 package com.lagradost
 
+import android.content.Context
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.common.CustomPage
+import com.lagradost.common.WatchHistoryConfig
+import com.lagradost.common.PluginIntegrationHelper
+import com.lagradost.common.cache.CacheAwareClient
+import com.lagradost.common.cache.FetchResult
+import com.lagradost.common.cache.fetchDocument
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import android.util.Log
@@ -19,7 +25,12 @@ private data class MvarrEntry(
     val suffix: String,
 )
 
-class SevenMmTv(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+class SevenMmTv(
+    private val customPages: List<CustomPage> = emptyList(),
+    private val cachedClient: CacheAwareClient? = null,
+    private val appContext: Context? = null,
+    private val watchHistoryConfig: WatchHistoryConfig? = null
+) : MainAPI() {
     companion object {
         private const val TAG = "SevenMmTv"
 
@@ -71,7 +82,8 @@ class SevenMmTv(private val customPages: List<CustomPage> = emptyList()) : MainA
             add(MainPageData(name = "Amateur JAV", data = "$mainUrl/en/amateurjav_list/all/"))
 
             customPages.forEach { page ->
-                add(MainPageData(name = page.label, data = "$mainUrl${page.path}"))
+                val safePath = if (page.path.startsWith("/")) page.path else "/${page.path}"
+                add(MainPageData(name = page.label, data = "$mainUrl$safePath"))
             }
         }
 
@@ -80,11 +92,22 @@ class SevenMmTv(private val customPages: List<CustomPage> = emptyList()) : MainA
         val url = "${request.data}${pageNum}.html"
 
         val document = try {
-            app.get(url, referer = "$mainUrl/en/").document
+            cachedClient.fetchDocument(url) { headers ->
+                    val resp = app.get(url, referer = "$mainUrl/en/", headers = headers)
+                    FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load main page '${request.name}': ${e.message}")
+            return newHomePageResponse(
+                HomePageList(request.name, emptyList(), isHorizontalImages = true),
+                hasNext = false
+            )
+        }
+
+        if (document == null) {
+            Log.w(TAG, "No data available for '${request.name}': $url")
             return newHomePageResponse(
                 HomePageList(request.name, emptyList(), isHorizontalImages = true),
                 hasNext = false
@@ -100,6 +123,8 @@ class SevenMmTv(private val customPages: List<CustomPage> = emptyList()) : MainA
             allPages.any { it.text().trim() != currentText && it.text().trim().toIntOrNull() != null && (it.text().trim().toIntOrNull() ?: 0) > (currentText?.toIntOrNull() ?: 0) }
         } ?: false
 
+        PluginIntegrationHelper.maybeRecordTagSource(appContext, request.name, request.data, TAG, videos.isNotEmpty())
+
         return newHomePageResponse(
             HomePageList(request.name, videos, isHorizontalImages = true),
             hasNext = videos.isNotEmpty() && hasNextPage
@@ -107,8 +132,12 @@ class SevenMmTv(private val customPages: List<CustomPage> = emptyList()) : MainA
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        PluginIntegrationHelper.recordSearch(appContext, query, TAG)
+        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+        val searchUrl = "$mainUrl/en/searchform_search/all/index.html?q=$encodedQuery"
+        // Skip cache for POST-based search — conditional headers don't apply to POST requests
         val document = try {
-            app.post(
+            val resp = app.post(
                 "$mainUrl/en/searchform_search/all/index.html",
                 referer = "$mainUrl/en/",
                 data = mapOf(
@@ -116,11 +145,17 @@ class SevenMmTv(private val customPages: List<CustomPage> = emptyList()) : MainA
                     "search_type" to "searchall",
                     "op" to "search"
                 )
-            ).document
+            )
+            if (resp.code in 200..299) org.jsoup.Jsoup.parse(resp.text, searchUrl) else null
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "Search failed for '$query': ${e.message}")
+            return emptyList()
+        }
+
+        if (document == null) {
+            Log.w(TAG, "No data available for search: $searchUrl")
             return emptyList()
         }
 
@@ -169,7 +204,7 @@ class SevenMmTv(private val customPages: List<CustomPage> = emptyList()) : MainA
 
         val recommendations = document.select("div.video").mapNotNull { parseVideoElement(it) }
 
-        return newMovieLoadResponse(title, url, TvType.NSFW, url) {
+        return newMovieLoadResponse(title, url, if (watchHistoryConfig?.isEnabled(name) == true) TvType.Movie else TvType.NSFW, url) {
             this.posterUrl = poster
             this.plot = description
             this.tags = tags

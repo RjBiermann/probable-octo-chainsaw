@@ -1,9 +1,15 @@
 package com.lagradost
 
+import android.content.Context
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.common.CustomPage
+import com.lagradost.common.WatchHistoryConfig
+import com.lagradost.common.PluginIntegrationHelper
+import com.lagradost.common.cache.CacheAwareClient
+import com.lagradost.common.cache.FetchResult
+import com.lagradost.common.cache.fetchDocument
 import org.json.JSONException
 import org.json.JSONObject
 import org.jsoup.nodes.Element
@@ -11,7 +17,12 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import kotlin.coroutines.cancellation.CancellationException
 
-class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+class PornHits(
+    private val customPages: List<CustomPage> = emptyList(),
+    private val cachedClient: CacheAwareClient? = null,
+    private val appContext: Context? = null,
+    private val watchHistoryConfig: WatchHistoryConfig? = null
+) : MainAPI() {
     companion object {
         private const val TAG = "PornHits"
 
@@ -57,7 +68,10 @@ class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAP
         // Use replace instead of format to avoid issues with URL-encoded characters (e.g., %20)
         val url = request.data.replace("%d", page.toString())
         val document = try {
-            app.get(url, referer = "$mainUrl/").document
+            cachedClient.fetchDocument(url) { headers ->
+                    val resp = app.get(url, referer = "$mainUrl/", headers = headers)
+                    FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                }
         } catch (e: CancellationException) {
             throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
@@ -65,7 +79,17 @@ class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAP
             throw ErrorLoadingException("Failed to load page. Check your internet connection.")
         }
 
+        if (document == null) {
+            Log.w(TAG, "Cache returned no data for: $url")
+            return newHomePageResponse(
+                HomePageList(request.name, emptyList(), isHorizontalImages = true),
+                hasNext = false
+            )
+        }
+
         val videos = document.select("article.item").mapNotNull { it.toSearchResult() }
+
+        PluginIntegrationHelper.maybeRecordTagSource(appContext, request.name, request.data, TAG, videos.isNotEmpty())
 
         return newHomePageResponse(
             HomePageList(request.name, videos, isHorizontalImages = true),
@@ -74,17 +98,28 @@ class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAP
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        PluginIntegrationHelper.recordSearch(appContext, query, TAG)
         val results = mutableListOf<SearchResponse>()
         val encodedQuery = URLEncoder.encode(query.trim(), "UTF-8")
 
         for (page in 1..5) {
             val url = "$mainUrl/videos.php?p=$page&q=$encodedQuery"
             val document = try {
-                app.get(url, referer = "$mainUrl/").document
+                cachedClient.fetchDocument(url,
+                    ttlMs = cachedClient?.searchTtlMs
+                    ) { headers ->
+                        val resp = app.get(url, referer = "$mainUrl/", headers = headers)
+                        FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                    }
             } catch (e: CancellationException) {
                 throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
                 Log.e(TAG, "Search request failed for page $page", e)
+                break
+            }
+
+            if (document == null) {
+                Log.w(TAG, "No data available for search page $page: $url")
                 break
             }
 
@@ -129,7 +164,7 @@ class PornHits(private val customPages: List<CustomPage> = emptyList()) : MainAP
         val recommendations = document.select("div.related-videos div.list-videos article.item")
             .mapNotNull { it.toSearchResult() }
 
-        return newMovieLoadResponse(title, url, TvType.NSFW, url) {
+        return newMovieLoadResponse(title, url, if (watchHistoryConfig?.isEnabled(name) == true) TvType.Movie else TvType.NSFW, url) {
             this.posterUrl = poster
             this.tags = tags
             this.recommendations = recommendations

@@ -109,8 +109,8 @@ data class NsfwUltimaSettings(
         fun fromJson(json: JSONObject): NsfwUltimaSettings = try {
             NsfwUltimaSettings(
                 showPluginNames = json.optBoolean("showPluginNames", true),
-                searchTimeoutMs = json.optLong("searchTimeoutMs", 5000L),
-                maxSearchConcurrency = json.optInt("maxSearchConcurrency", 4)
+                searchTimeoutMs = json.optLong("searchTimeoutMs", 5000L).coerceAtLeast(1000L),
+                maxSearchConcurrency = json.optInt("maxSearchConcurrency", 4).coerceIn(1, 10)
             )
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse NsfwUltimaSettings, using defaults: ${e.message}")

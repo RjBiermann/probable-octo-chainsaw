@@ -1,19 +1,29 @@
 package com.lagradost
 
+import android.content.Context
 import android.util.Log
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.common.CustomPage
-import com.lagradost.cloudstream3.network.WebViewResolver
+import com.lagradost.common.WatchHistoryConfig
+import com.lagradost.common.PluginIntegrationHelper
+import com.lagradost.common.cache.CacheAwareClient
+import com.lagradost.common.cache.FetchResult
+import com.lagradost.common.cache.fetchDocument
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import org.json.JSONArray
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 
-class MissAV(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+class MissAV(
+    private val customPages: List<CustomPage> = emptyList(),
+    private val cachedClient: CacheAwareClient? = null,
+    private val appContext: Context? = null,
+    private val watchHistoryConfig: WatchHistoryConfig? = null
+) : MainAPI() {
     companion object {
         private const val TAG = "MissAV"
 
@@ -46,8 +56,18 @@ class MissAV(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         return try {
-            val document = app.get("${request.data}?page=$page").document
+            val url = "${request.data}?page=$page"
+            val document = cachedClient.fetchDocument(url) { headers ->
+                    val resp = app.get(url, headers = headers)
+                    FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                }
+            if (document == null) {
+                Log.w(TAG, "No data available for '${request.name}': $url")
+                return newHomePageResponse(HomePageList(request.name, emptyList()), hasNext = false)
+            }
             val videos = document.select(".thumbnail").mapNotNull { it.toSearchResult() }
+
+            PluginIntegrationHelper.maybeRecordTagSource(appContext, request.name, request.data, TAG, videos.isNotEmpty())
 
             newHomePageResponse(
                 HomePageList(request.name, videos, isHorizontalImages = true),
@@ -62,12 +82,23 @@ class MissAV(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        PluginIntegrationHelper.recordSearch(appContext, query, TAG)
         val results = mutableListOf<SearchResponse>()
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
 
         for (page in 1..5) {
             try {
-                val document = app.get("$mainUrl/en/search/$encodedQuery?page=$page").document
+                val searchUrl = "$mainUrl/en/search/$encodedQuery?page=$page"
+                val document = cachedClient.fetchDocument(searchUrl,
+                    ttlMs = cachedClient?.searchTtlMs
+                    ) { headers ->
+                        val resp = app.get(searchUrl, headers = headers)
+                        FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                    }
+                if (document == null) {
+                    Log.w(TAG, "No data available for search page $page: $searchUrl")
+                    break
+                }
                 val pageResults = document.select(".thumbnail").mapNotNull { it.toSearchResult() }
 
                 if (pageResults.isEmpty()) break
@@ -97,19 +128,24 @@ class MissAV(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
             val poster = fixUrlNull(document.selectFirst("meta[property=og:image]")?.attr("content"))
             val description = document.selectFirst("meta[property=og:description]")?.attr("content")?.trim()
 
-            // Try WebView first, fall back to actress/genre pages
-            var recommendations = fetchRecommendationsViaWebView(url)
-            if (recommendations.isEmpty()) {
-                Log.d(TAG, "WebView returned no recommendations, using fallback")
-                recommendations = fetchRecommendationsFallback(document, url)
-                if (recommendations.isEmpty()) {
-                    Log.w(TAG, "Both WebView and fallback methods returned no recommendations for: $url")
-                }
-            }
+            val recommendations = fetchRecommendations(document, url)
 
-            newMovieLoadResponse(title, url, TvType.NSFW, url) {
+            // Separate actresses from genre tags
+            val actresses = document.select("a[href*=/actresses/]")
+                .map { it.text().trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+
+            val genres = document.select("a[href*=/genres/]")
+                .map { it.text().trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+
+            newMovieLoadResponse(title, url, if (watchHistoryConfig?.isEnabled(name) == true) TvType.Movie else TvType.NSFW, url) {
                 this.posterUrl = poster
                 this.plot = description
+                this.tags = genres
+                addActors(actresses)
                 this.recommendations = recommendations
             }
         } catch (e: CancellationException) {
@@ -121,12 +157,11 @@ class MissAV(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
     }
 
     /**
-     * Fallback: fetch related videos from actress/genre pages when WebView
-     * returns no recommendations (empty or failed).
+     * Fetch related videos from actress/genre pages.
      * Fetches from first actress and first genre page in parallel,
      * deduplicates results, excludes current video, and limits to 20 items.
      */
-    private suspend fun fetchRecommendationsFallback(document: Document, currentUrl: String): List<SearchResponse> {
+    private suspend fun fetchRecommendations(document: Document, currentUrl: String): List<SearchResponse> {
         val actressLink = document.select("a[href*=/actresses/]")
             .mapNotNull { fixUrlNull(it.attr("href")) }
             .firstOrNull()
@@ -163,104 +198,6 @@ class MissAV(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
             throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
             Log.w(TAG, "Failed to fetch related videos from: $pageUrl", e)
-            emptyList()
-        }
-    }
-
-    /**
-     * Uses WebView to load the page and execute JavaScript to extract recommendations
-     * from the Recombee-powered recommendItems variable.
-     *
-     * Returns empty list if:
-     * - WebView times out before Recombee loads (5 second limit)
-     * - Page doesn't use Recombee for recommendations
-     * - JavaScript execution fails or returns invalid JSON
-     */
-    private suspend fun fetchRecommendationsViaWebView(url: String): List<SearchResponse> {
-        var recommendationsJson: String? = null
-
-        // JavaScript to extract recommendItems after Recombee populates it
-        // Returns JSON array of {dvd_id, title, duration} objects
-        val extractScript = """
-            (function() {
-                if (window.recommendItems && window.recommendItems.length > 0 && window.recommendItems[0].dvd_id) {
-                    var results = window.recommendItems.slice(0, 20).map(function(item) {
-                        return {
-                            dvd_id: item.dvd_id,
-                            title: item.title_en || item.full_title || item.dvd_id,
-                            duration: item.duration
-                        };
-                    }).filter(function(item) { return item.dvd_id; });
-                    return JSON.stringify(results);
-                }
-                return null;
-            })()
-        """.trimIndent()
-
-        try {
-            val resolver = WebViewResolver(
-                // interceptUrl pattern intentionally never matches any URL, ensuring
-                // WebView runs for the full timeout duration to allow Recombee to load
-                interceptUrl = Regex("""^${'$'}NEVER_MATCH_THIS^"""),
-                additionalUrls = emptyList(),
-                userAgent = null,
-                useOkhttp = false,
-                script = extractScript,
-                scriptCallback = { result ->
-                    // Script returns "null" string if not ready, or JSON array if ready
-                    if (result != "null" && result.startsWith("[")) {
-                        Log.d(TAG, "Got recommendations JSON: ${result.take(100)}...")
-                        recommendationsJson = result
-                    }
-                },
-                timeout = 5_000L  // 5 second timeout for Recombee to load
-            )
-
-            app.get(url, interceptor = resolver)
-
-            val json = recommendationsJson
-            if (json != null) {
-                return parseRecommendationsJson(json)
-            } else {
-                Log.d(TAG, "WebView completed but no recommendations captured")
-            }
-        } catch (e: CancellationException) {
-            throw e  // Don't swallow coroutine cancellation
-        } catch (e: Exception) {
-            Log.w(TAG, "WebView recommendation extraction failed for: $url", e)
-        }
-
-        return emptyList()
-    }
-
-    /**
-     * Parses the JSON array from JavaScript into SearchResponse objects.
-     * Uses org.json.JSONArray for robust parsing.
-     */
-    private fun parseRecommendationsJson(json: String): List<SearchResponse> {
-        return try {
-            val array = JSONArray(json)
-            val items = mutableListOf<SearchResponse>()
-
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                val dvdId = obj.optString("dvd_id", "").ifBlank { continue }
-                val title = obj.optString("title", "").ifBlank { dvdId.uppercase() }
-
-                val videoUrl = "$mainUrl/en/$dvdId"
-                val posterUrl = "https://fourhoi.com/$dvdId/cover-t.jpg"
-
-                items.add(
-                    newMovieSearchResponse(title, videoUrl, TvType.NSFW) {
-                        this.posterUrl = posterUrl
-                    }
-                )
-            }
-
-            Log.d(TAG, "Extracted ${items.size} recommendations via WebView")
-            items
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse recommendations JSON (first 200 chars: ${json.take(200)})", e)
             emptyList()
         }
     }

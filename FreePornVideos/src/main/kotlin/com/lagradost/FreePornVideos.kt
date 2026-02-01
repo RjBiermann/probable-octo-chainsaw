@@ -1,14 +1,25 @@
 package com.lagradost
 
+import android.content.Context
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.common.CustomPage
+import com.lagradost.common.WatchHistoryConfig
+import com.lagradost.common.PluginIntegrationHelper
+import com.lagradost.common.cache.CacheAwareClient
+import com.lagradost.common.cache.FetchResult
+import com.lagradost.common.cache.fetchDocument
 import org.jsoup.nodes.Element
 import kotlin.coroutines.cancellation.CancellationException
 
-class FreePornVideos(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+class FreePornVideos(
+    private val customPages: List<CustomPage> = emptyList(),
+    private val cachedClient: CacheAwareClient? = null,
+    private val appContext: Context? = null,
+    private val watchHistoryConfig: WatchHistoryConfig? = null
+) : MainAPI() {
     companion object {
         private const val TAG = "FreePornVideos"
 
@@ -49,7 +60,10 @@ class FreePornVideos(private val customPages: List<CustomPage> = emptyList()) : 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = request.data.replace("%d", page.toString())
         val document = try {
-            app.get(url, referer = "$mainUrl/").document
+            cachedClient.fetchDocument(url) { headers ->
+                    val resp = app.get(url, referer = "$mainUrl/", headers = headers)
+                    FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -57,7 +71,17 @@ class FreePornVideos(private val customPages: List<CustomPage> = emptyList()) : 
             throw ErrorLoadingException("Failed to load page. Check your internet connection.")
         }
 
+        if (document == null) {
+            Log.w(TAG, "Cache returned no data for: $url")
+            return newHomePageResponse(
+                HomePageList(request.name, emptyList(), isHorizontalImages = true),
+                hasNext = false
+            )
+        }
+
         val videos = document.select("div.item").mapNotNull { it.toSearchResult() }
+
+        PluginIntegrationHelper.maybeRecordTagSource(appContext, request.name, request.data, TAG, videos.isNotEmpty())
 
         return newHomePageResponse(
             HomePageList(request.name, videos, isHorizontalImages = true),
@@ -66,6 +90,7 @@ class FreePornVideos(private val customPages: List<CustomPage> = emptyList()) : 
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        PluginIntegrationHelper.recordSearch(appContext, query, TAG)
         val slug = query.trim()
             .replace(SLUG_SANITIZE, "")
             .replace(MULTI_SPACE, "-")
@@ -78,13 +103,20 @@ class FreePornVideos(private val customPages: List<CustomPage> = emptyList()) : 
         for (page in 1..2) {
             val url = "$mainUrl/search/$slug/$page/"
             val document = try {
-                app.get(url, referer = "$mainUrl/").document
+                cachedClient.fetchDocument(url,
+                    ttlMs = cachedClient?.searchTtlMs
+                    ) { headers ->
+                        val resp = app.get(url, referer = "$mainUrl/", headers = headers)
+                        FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                    }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Search request failed for page $page", e)
                 break
             }
+
+            if (document == null) break
 
             val pageResults = document.select("#custom_list_videos_videos_list_search_result_items > div.item")
                 .mapNotNull { it.toSearchResult() }
@@ -133,7 +165,7 @@ class FreePornVideos(private val customPages: List<CustomPage> = emptyList()) : 
         val rating = document.selectFirst("div.rating span")?.text()
             ?.substringBefore("%")?.trim()?.toFloatOrNull()?.div(10)?.toString()
 
-        return newMovieLoadResponse(title, url, TvType.NSFW, url) {
+        return newMovieLoadResponse(title, url, if (watchHistoryConfig?.isEnabled(name) == true) TvType.Movie else TvType.NSFW, url) {
             this.posterUrl = poster
             this.year = year
             this.plot = description

@@ -7,6 +7,8 @@ import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.common.GlobalStorageCustomPagesRepository
+import com.lagradost.common.PluginBootstrap
+import com.lagradost.common.cache.SharedHttpPool
 
 @CloudstreamPlugin
 class PerverzijaPlugin : Plugin() {
@@ -35,8 +37,13 @@ class PerverzijaPlugin : Plugin() {
             }
         }
 
-        registerMainAPI(Perverzija(customPages))
+        val bootstrap = PluginBootstrap.create(context, "Perverzija", { key -> getKey(key) }, { key, value -> setKey(key, value) })
+
+        registerMainAPI(Perverzija(customPages, bootstrap.cachedClient, bootstrap.appContext, bootstrap.watchHistoryConfig))
         registerExtractorAPI(Xtremestream())
         registerExtractorAPI(Playhydrax())
+    }
+    override fun beforeUnload() {
+        SharedHttpPool.releaseClient("Perverzija")
     }
 }

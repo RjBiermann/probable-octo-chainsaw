@@ -53,7 +53,7 @@ main() {
   repo_dir=$(basename "$GITHUB_URL")
   cd "$repo_dir"
 
-  git remote add mirror "$CODEBERG_URL"
+  git remote add mirror "$CODEBERG_URL" 2>/dev/null || git remote set-url mirror "$CODEBERG_URL"
 
   if ! git push mirror --all --force; then
     error "Failed to push branches to mirror"

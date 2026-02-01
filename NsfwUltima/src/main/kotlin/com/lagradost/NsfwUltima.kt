@@ -226,6 +226,8 @@ class NsfwUltima(
                 },
                 hasNext = response.hasNext
             )
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error loading from ${sectionData.pluginName}: ${e.message}", e)
             throw ErrorLoadingException("Failed to load from ${sectionData.pluginName}: ${e.message}")

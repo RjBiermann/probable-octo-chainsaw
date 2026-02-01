@@ -7,6 +7,8 @@ import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.common.GlobalStorageCustomPagesRepository
+import com.lagradost.common.PluginBootstrap
+import com.lagradost.common.cache.SharedHttpPool
 
 @CloudstreamPlugin
 class HQPornerPlugin : Plugin() {
@@ -35,8 +37,13 @@ class HQPornerPlugin : Plugin() {
             }
         }
 
-        registerMainAPI(HQPorner(customPages))
+        val bootstrap = PluginBootstrap.create(context, "HQPorner", { key -> getKey(key) }, { key, value -> setKey(key, value) })
+
+        registerMainAPI(HQPorner(customPages, bootstrap.cachedClient, bootstrap.appContext, bootstrap.watchHistoryConfig))
         registerExtractorAPI(MyDaddyExtractor())
         registerExtractorAPI(HQWOExtractor())
+    }
+    override fun beforeUnload() {
+        SharedHttpPool.releaseClient("HQPorner")
     }
 }

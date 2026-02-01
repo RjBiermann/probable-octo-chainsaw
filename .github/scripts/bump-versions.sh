@@ -93,17 +93,25 @@ usage() {
 # Sets BUMP_ALL=true if diff fails (e.g., force-push) or CommonLib changed.
 detect_changed_files() {
   if [[ "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]]; then
-    CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null) || {
-      warn "Cannot diff initial commit, bumping all plugins"
+    local diff_err_file=$(mktemp)
+    CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>"$diff_err_file") || {
+      local diff_err=$(cat "$diff_err_file" 2>/dev/null)
+      rm -f "$diff_err_file"
+      warn "Cannot diff initial commit (${diff_err:-unknown error}), bumping all plugins"
       BUMP_ALL=true
       return
     }
+    rm -f "$diff_err_file"
   else
-    CHANGED_FILES=$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA" 2>/dev/null) || {
-      warn "Cannot diff ${BEFORE_SHA}..${AFTER_SHA} (force-push?), bumping all plugins"
+    local diff_err_file=$(mktemp)
+    CHANGED_FILES=$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA" 2>"$diff_err_file") || {
+      local diff_err=$(cat "$diff_err_file" 2>/dev/null)
+      rm -f "$diff_err_file"
+      warn "Cannot diff ${BEFORE_SHA}..${AFTER_SHA} (${diff_err:-force-push?}), bumping all plugins"
       BUMP_ALL=true
       return
     }
+    rm -f "$diff_err_file"
   fi
 
   if printf '%s\n' "$CHANGED_FILES" | grep -q "^CommonLib/"; then

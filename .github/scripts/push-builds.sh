@@ -41,10 +41,16 @@ main() {
   fi
 
   if git rev-parse HEAD >/dev/null 2>&1; then
-    git commit --amend -m "Build $COMMIT_SHA"
+    if ! git commit --amend -m "Build $COMMIT_SHA"; then
+      error "Failed to commit build artifacts"
+      exit 1
+    fi
   else
     notice "Builds branch is new, creating initial commit"
-    git commit -m "Build $COMMIT_SHA"
+    if ! git commit -m "Build $COMMIT_SHA"; then
+      error "Failed to commit build artifacts"
+      exit 1
+    fi
   fi
 
   if ! git push --force; then

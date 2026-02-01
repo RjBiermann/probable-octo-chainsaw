@@ -462,6 +462,11 @@ object CloudstreamUI {
                 TvFocusUtils.dpToPx(context, Dimens.PADDING_MEDIUM),
                 0
             )
+            // Override MATCH_PARENT from parent factory so button works inline
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
         }
     }
 

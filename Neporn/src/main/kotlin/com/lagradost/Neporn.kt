@@ -1,14 +1,34 @@
 package com.lagradost
 
+import android.content.Context
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.common.CustomPage
+import com.lagradost.common.WatchHistoryConfig
+import com.lagradost.common.PluginIntegrationHelper
+import com.lagradost.common.cache.CacheAwareClient
+import com.lagradost.common.cache.FetchResult
+import com.lagradost.common.cache.Prefetcher
+import com.lagradost.common.cache.fetchDocument
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import kotlin.coroutines.cancellation.CancellationException
 
-class Neporn(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+/** Detect neporn.com 404 pages (server redirects to /404.php with these DOM markers). */
+private fun Document.is404Page(): Boolean =
+    selectFirst("div.error-404") != null
+        || selectFirst("div.no-results") != null
+        || (title().contains("404") && select("div.list-videos div.item").isEmpty())
+
+class Neporn(
+    private val customPages: List<CustomPage> = emptyList(),
+    private val cachedClient: CacheAwareClient? = null,
+    private val appContext: Context? = null,
+    private val watchHistoryConfig: WatchHistoryConfig? = null,
+    private val prefetcher: Prefetcher? = null
+) : MainAPI() {
     companion object {
         private const val TAG = "Neporn"
 
@@ -35,7 +55,8 @@ class Neporn(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
 
             // Custom pages from user settings
             customPages.forEach { page ->
-                add(MainPageData(name = page.label, data = "$mainUrl${page.path}"))
+                val safePath = if (page.path.startsWith("/")) page.path else "/${page.path}"
+                add(MainPageData(name = page.label, data = "$mainUrl$safePath"))
             }
         }
 
@@ -46,16 +67,33 @@ class Neporn(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
                 "${request.data}${separator}from=$page"
             } else request.data
 
-            val response = app.get(url, referer = "$mainUrl/")
+            val document = cachedClient.fetchDocument(url) { headers ->
+                val resp = app.get(url, referer = "$mainUrl/", headers = headers)
+                FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+            }
 
-            // Detect 404 redirect - site shows fallback content but URL contains /404.php
-            val is404 = response.url.contains("/404.php")
-
-            val videos = if (is404) {
+            if (document == null) Log.w(TAG, "No data available for '${request.name}': $url")
+            val is404 = document != null && document.is404Page()
+            val videos = if (document == null || is404) {
                 emptyList()
             } else {
-                response.document.select("div.list-videos div.item").mapNotNull { parseVideoElement(it) }
+                document.select("div.list-videos div.item").mapNotNull { parseVideoElement(it) }
             }
+
+            // Prefetch next page in background
+            if (videos.isNotEmpty() && !is404) {
+                val nextPage = page + 1
+                val nextUrl = run {
+                    val separator = if (request.data.contains("?")) "&" else "?"
+                    "${request.data}${separator}from=$nextPage"
+                }
+                prefetcher?.prefetchUrl(nextUrl) { headers ->
+                    val resp = app.get(nextUrl, referer = "$mainUrl/", headers = headers)
+                    FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                }
+            }
+
+            PluginIntegrationHelper.maybeRecordTagSource(appContext, request.name, request.data, TAG, videos.isNotEmpty())
 
             newHomePageResponse(
                 HomePageList(request.name, videos, isHorizontalImages = true),
@@ -70,6 +108,7 @@ class Neporn(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        PluginIntegrationHelper.recordSearch(appContext, query, TAG)
         val results = mutableListOf<SearchResponse>()
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
 
@@ -81,12 +120,21 @@ class Neporn(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
                     "$mainUrl/search/?q=$encodedQuery&from_videos=$page&from_albums=$page"
                 }
 
-                val response = app.get(url, referer = "$mainUrl/")
+                val document = cachedClient.fetchDocument(url,
+                    ttlMs = cachedClient?.searchTtlMs
+                ) { headers ->
+                    val resp = app.get(url, referer = "$mainUrl/", headers = headers)
+                    FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                }
 
-                // Stop if redirected to 404 page
-                if (response.url.contains("/404.php")) break
+                if (document == null) {
+                    Log.w(TAG, "No data available for search page $page: $url")
+                    break
+                }
 
-                val pageResults = response.document.select("div.list-videos div.item")
+                if (document.is404Page()) break
+
+                val pageResults = document.select("div.list-videos div.item")
                     .mapNotNull { parseVideoElement(it) }
 
                 if (pageResults.isEmpty()) break
@@ -128,7 +176,7 @@ class Neporn(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
             val recommendations = document.select("div.related-videos div.list-videos div.item")
                 .mapNotNull { parseVideoElement(it) }
 
-            newMovieLoadResponse(title, url, TvType.NSFW, url) {
+            newMovieLoadResponse(title, url, if (watchHistoryConfig?.isEnabled(name) == true) TvType.Movie else TvType.NSFW, url) {
                 this.posterUrl = poster
                 this.plot = description
                 this.tags = tags

@@ -1,15 +1,26 @@
 package com.lagradost
 
+import android.content.Context
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.common.CustomPage
+import com.lagradost.common.WatchHistoryConfig
+import com.lagradost.common.PluginIntegrationHelper
+import com.lagradost.common.cache.CacheAwareClient
+import com.lagradost.common.cache.FetchResult
+import com.lagradost.common.cache.fetchDocument
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
 import kotlin.coroutines.cancellation.CancellationException
 
-class Perverzija(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+class Perverzija(
+    private val customPages: List<CustomPage> = emptyList(),
+    private val cachedClient: CacheAwareClient? = null,
+    private val appContext: Context? = null,
+    private val watchHistoryConfig: WatchHistoryConfig? = null
+) : MainAPI() {
     companion object {
         private const val TAG = "Perverzija"
     }
@@ -29,15 +40,20 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
             add(MainPageData(name = "Featured", data = "$mainUrl/featured-scenes/page/%d/?orderby=date"))
 
             customPages.forEach { page ->
-                add(MainPageData(name = page.label, data = "$mainUrl${page.path}page/%d/"))
+                val safePath = if (page.path.startsWith("/")) page.path else "/${page.path}"
+                val pathWithSlash = if (safePath.endsWith("/")) safePath else "$safePath/"
+                add(MainPageData(name = page.label, data = "${mainUrl}${pathWithSlash}page/%d/"))
             }
         }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = request.data.format(page)
+        val url = request.data.replace("%d", page.toString())
 
-        val response = try {
-            app.get(url, interceptor = cfInterceptor, timeout = 30L)
+        val document = try {
+            cachedClient.fetchDocument(url) { headers ->
+                    val resp = app.get(url, interceptor = cfInterceptor, timeout = 30L, headers = headers)
+                    FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                }
         } catch (e: CancellationException) {
             throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
@@ -48,9 +64,19 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
             )
         }
 
-        val videos = response.document.select("div.row div div.post").mapNotNull {
+        if (document == null) {
+            Log.w(TAG, "No data available for '${request.name}': $url")
+            return newHomePageResponse(
+                HomePageList(request.name, emptyList(), isHorizontalImages = true),
+                hasNext = false
+            )
+        }
+
+        val videos = document.select("div.row div div.post").mapNotNull {
             it.toSearchResult()
         }
+
+        PluginIntegrationHelper.maybeRecordTagSource(appContext, request.name, request.data, TAG, videos.isNotEmpty())
 
         return newHomePageResponse(
             HomePageList(request.name, videos, isHorizontalImages = true),
@@ -59,14 +85,20 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        PluginIntegrationHelper.recordSearch(appContext, query, TAG)
         val results = mutableListOf<SearchResponse>()
         val encodedQuery = query.replace(" ", "+")
 
         for (page in 1..3) {
             val url = "$mainUrl/page/$page/?s=$encodedQuery&orderby=date"
 
-            val response = try {
-                app.get(url, interceptor = cfInterceptor, timeout = 30L)
+            val document = try {
+                cachedClient.fetchDocument(url,
+                    ttlMs = cachedClient?.searchTtlMs
+                    ) { headers ->
+                        val resp = app.get(url, interceptor = cfInterceptor, timeout = 30L, headers = headers)
+                        FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                    }
             } catch (e: CancellationException) {
                 throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
@@ -74,7 +106,12 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
                 break
             }
 
-            val pageResults = response.document.select("div.row div div.post")
+            if (document == null) {
+                Log.w(TAG, "No data available for search page $page: $url")
+                break
+            }
+
+            val pageResults = document.select("div.row div div.post")
                 .mapNotNull { it.toSearchResult() }
 
             if (pageResults.isEmpty()) break
@@ -117,7 +154,7 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
             it.toRecommendationResult()
         }
 
-        return newMovieLoadResponse(title, url, TvType.NSFW, url) {
+        return newMovieLoadResponse(title, url, if (watchHistoryConfig?.isEnabled(name) == true) TvType.Movie else TvType.NSFW, url) {
             this.posterUrl = poster
             this.plot = description
             this.tags = tags
@@ -168,6 +205,8 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
                         Log.w(TAG, "Xtremestream extractor found no video links for: $iframeUrl")
                     }
                     foundLinks
+                } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.e(TAG, "Xtremestream extractor failed for: $iframeUrl", e)
                     false
@@ -180,6 +219,8 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
                         Log.w(TAG, "Playhydrax extractor found no video links for: $iframeUrl")
                     }
                     foundLinks
+                } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.e(TAG, "Playhydrax extractor failed for: $iframeUrl", e)
                     false
@@ -194,6 +235,8 @@ class Perverzija(private val customPages: List<CustomPage> = emptyList()) : Main
                         Log.w(TAG, "loadExtractor found no video links for unknown embed: $iframeUrl")
                     }
                     foundLinks
+                } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.e(TAG, "loadExtractor failed for unknown embed: $iframeUrl", e)
                     false

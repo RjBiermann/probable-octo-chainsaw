@@ -1,16 +1,27 @@
 package com.lagradost
 
+import android.content.Context
 import android.util.Base64
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.common.CustomPage
+import com.lagradost.common.WatchHistoryConfig
+import com.lagradost.common.PluginIntegrationHelper
+import com.lagradost.common.cache.CacheAwareClient
+import com.lagradost.common.cache.FetchResult
+import com.lagradost.common.cache.fetchDocument
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 import kotlin.coroutines.cancellation.CancellationException
 
-class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+class HQPorner(
+    private val customPages: List<CustomPage> = emptyList(),
+    private val cachedClient: CacheAwareClient? = null,
+    private val appContext: Context? = null,
+    private val watchHistoryConfig: WatchHistoryConfig? = null
+) : MainAPI() {
     companion object {
         private const val TAG = "HQPorner"
 
@@ -45,11 +56,22 @@ class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAP
         val url = if (page > 1) "${request.data}/$page" else request.data
 
         val document = try {
-            app.get(url, referer = "$mainUrl/").document
+            cachedClient.fetchDocument(url) { headers ->
+                    val resp = app.get(url, referer = "$mainUrl/", headers = headers)
+                    FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                }
         } catch (e: CancellationException) {
             throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load main page '${request.name}': ${e.message}")
+            return newHomePageResponse(
+                HomePageList(request.name, emptyList(), isHorizontalImages = true),
+                hasNext = false
+            )
+        }
+
+        if (document == null) {
+            Log.w(TAG, "No data available for '${request.name}': $url")
             return newHomePageResponse(
                 HomePageList(request.name, emptyList(), isHorizontalImages = true),
                 hasNext = false
@@ -62,6 +84,8 @@ class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAP
         // Check if there's content to determine hasNext
         val hasNextPage = videos.isNotEmpty()
 
+        PluginIntegrationHelper.maybeRecordTagSource(appContext, request.name, request.data, TAG, videos.isNotEmpty())
+
         return newHomePageResponse(
             HomePageList(request.name, videos, isHorizontalImages = true),
             hasNext = hasNextPage
@@ -69,6 +93,7 @@ class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAP
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        PluginIntegrationHelper.recordSearch(appContext, query, TAG)
         val results = mutableListOf<SearchResponse>()
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
 
@@ -76,11 +101,21 @@ class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAP
             val url = "$mainUrl/?q=$encodedQuery&p=$page"
 
             val document = try {
-                app.get(url, referer = "$mainUrl/").document
+                cachedClient.fetchDocument(url,
+                    ttlMs = cachedClient?.searchTtlMs
+                    ) { headers ->
+                        val resp = app.get(url, referer = "$mainUrl/", headers = headers)
+                        FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                    }
             } catch (e: CancellationException) {
                 throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
                 Log.w(TAG, "Search failed for '$query' page $page: ${e.message}")
+                break
+            }
+
+            if (document == null) {
+                Log.w(TAG, "No data available for search page $page: $url")
                 break
             }
 
@@ -135,7 +170,7 @@ class HQPorner(private val customPages: List<CustomPage> = emptyList()) : MainAP
             val recommendations = document.select("div.row section.box.feature:has(span.icon)")
                 .mapNotNull { it.toSearchResult() }
 
-            newMovieLoadResponse(title, url, TvType.NSFW, url) {
+            newMovieLoadResponse(title, url, if (watchHistoryConfig?.isEnabled(name) == true) TvType.Movie else TvType.NSFW, url) {
                 this.posterUrl = poster
                 this.plot = description
                 this.tags = tags

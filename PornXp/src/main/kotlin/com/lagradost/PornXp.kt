@@ -1,7 +1,13 @@
 package com.lagradost
 
+import android.content.Context
 import com.lagradost.cloudstream3.*
 import com.lagradost.common.CustomPage
+import com.lagradost.common.WatchHistoryConfig
+import com.lagradost.common.PluginIntegrationHelper
+import com.lagradost.common.cache.CacheAwareClient
+import com.lagradost.common.cache.FetchResult
+import com.lagradost.common.cache.fetchDocument
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
 import android.util.Log
@@ -9,7 +15,12 @@ import org.jsoup.nodes.Element
 import java.net.URLEncoder
 import kotlin.coroutines.cancellation.CancellationException
 
-class PornXp(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+class PornXp(
+    private val customPages: List<CustomPage> = emptyList(),
+    private val cachedClient: CacheAwareClient? = null,
+    private val appContext: Context? = null,
+    private val watchHistoryConfig: WatchHistoryConfig? = null
+) : MainAPI() {
     companion object {
         private const val TAG = "PornXp"
     }
@@ -31,7 +42,8 @@ class PornXp(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
 
             // Custom pages from user settings
             customPages.forEach { page ->
-                add(MainPageData(name = page.label, data = "$mainUrl${page.path}"))
+                val safePath = if (page.path.startsWith("/")) page.path else "/${page.path}"
+                add(MainPageData(name = page.label, data = "$mainUrl$safePath"))
             }
         }
 
@@ -42,11 +54,22 @@ class PornXp(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
         } else request.data
 
         val document = try {
-            app.get(url, referer = "$mainUrl/").document
+            cachedClient.fetchDocument(url) { headers ->
+                    val resp = app.get(url, referer = "$mainUrl/", headers = headers)
+                    FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                }
         } catch (e: CancellationException) {
             throw e  // Don't swallow coroutine cancellation
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load main page '${request.name}': ${e.message}")
+            return newHomePageResponse(
+                HomePageList(request.name, emptyList(), isHorizontalImages = true),
+                hasNext = false
+            )
+        }
+
+        if (document == null) {
+            Log.w(TAG, "No data available for '${request.name}': $url")
             return newHomePageResponse(
                 HomePageList(request.name, emptyList(), isHorizontalImages = true),
                 hasNext = false
@@ -58,6 +81,8 @@ class PornXp(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
         // Check if there's a "next page" link (>) in the pagination
         val hasNextPage = document.selectFirst("div#pages a:contains(>)") != null
 
+        PluginIntegrationHelper.maybeRecordTagSource(appContext, request.name, request.data, TAG, videos.isNotEmpty())
+
         return newHomePageResponse(
             HomePageList(request.name, videos, isHorizontalImages = true),
             hasNext = videos.isNotEmpty() && hasNextPage
@@ -65,18 +90,29 @@ class PornXp(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        PluginIntegrationHelper.recordSearch(appContext, query, TAG)
         val results = mutableListOf<SearchResponse>()
-        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val encodedQuery = URLEncoder.encode(query, "UTF-8").replace("+", "%20")
 
         for (page in 1..5) {
             val url = if (page == 1) "$mainUrl/tags/$encodedQuery" else "$mainUrl/tags/$encodedQuery?page=$page"
 
             val document = try {
-                app.get(url, referer = "$mainUrl/").document
+                cachedClient.fetchDocument(url,
+                    ttlMs = cachedClient?.searchTtlMs
+                    ) { headers ->
+                        val resp = app.get(url, referer = "$mainUrl/", headers = headers)
+                        FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                    }
             } catch (e: CancellationException) {
                 throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
                 Log.w(TAG, "Search failed for '$query' page $page: ${e.message}")
+                break
+            }
+
+            if (document == null) {
+                Log.w(TAG, "No data available for search page $page: $url")
                 break
             }
 
@@ -121,7 +157,7 @@ class PornXp(private val customPages: List<CustomPage> = emptyList()) : MainAPI(
         val recommendations = document.select("div.item_cont")
             .mapNotNull { parseVideoElement(it) }
 
-        return newMovieLoadResponse(title, url, TvType.NSFW, url) {
+        return newMovieLoadResponse(title, url, if (watchHistoryConfig?.isEnabled(name) == true) TvType.Movie else TvType.NSFW, url) {
             this.posterUrl = poster
             this.plot = description
             this.tags = tags

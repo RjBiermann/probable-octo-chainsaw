@@ -7,6 +7,8 @@ import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.common.GlobalStorageCustomPagesRepository
+import com.lagradost.common.PluginBootstrap
+import com.lagradost.common.cache.SharedHttpPool
 
 @CloudstreamPlugin
 class MissAVPlugin : Plugin() {
@@ -35,6 +37,11 @@ class MissAVPlugin : Plugin() {
             }
         }
 
-        registerMainAPI(MissAV(customPages))
+        val bootstrap = PluginBootstrap.create(context, "MissAV", { key -> getKey(key) }, { key, value -> setKey(key, value) })
+
+        registerMainAPI(MissAV(customPages, bootstrap.cachedClient, bootstrap.appContext, bootstrap.watchHistoryConfig))
+    }
+    override fun beforeUnload() {
+        SharedHttpPool.releaseClient("MissAV")
     }
 }

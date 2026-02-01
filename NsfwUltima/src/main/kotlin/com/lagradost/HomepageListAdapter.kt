@@ -75,7 +75,9 @@ class HomepageListAdapter(
             val rippleAttr = android.R.attr.selectableItemBackground
             val typedValue = android.util.TypedValue()
             context.theme.resolveAttribute(rippleAttr, typedValue, true)
-            foreground = androidx.core.content.ContextCompat.getDrawable(context, typedValue.resourceId)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                foreground = androidx.core.content.ContextCompat.getDrawable(context, typedValue.resourceId)
+            }
         }
 
         // Content container

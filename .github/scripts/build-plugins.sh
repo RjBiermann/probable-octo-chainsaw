@@ -45,7 +45,10 @@ main() {
     exit 1
   fi
 
-  cp "${cs3_files[@]}" "$OUTPUT_DIR"
+  if ! cp "${cs3_files[@]}" "$OUTPUT_DIR"; then
+    error "Failed to copy .cs3 files to $OUTPUT_DIR"
+    exit 1
+  fi
   log "Copied ${#cs3_files[@]} plugin files"
 
   # Collect plugins.json manifest
@@ -54,7 +57,10 @@ main() {
     exit 1
   fi
 
-  cp build/plugins.json "$OUTPUT_DIR"
+  if ! cp build/plugins.json "$OUTPUT_DIR"; then
+    error "Failed to copy plugins.json to $OUTPUT_DIR"
+    exit 1
+  fi
   log "Copied plugins.json"
 }
 

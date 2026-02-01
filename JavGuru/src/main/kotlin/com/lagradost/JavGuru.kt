@@ -1,15 +1,26 @@
 package com.lagradost
 
+import android.content.Context
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.common.CustomPage
+import com.lagradost.common.WatchHistoryConfig
+import com.lagradost.common.PluginIntegrationHelper
+import com.lagradost.common.cache.CacheAwareClient
+import com.lagradost.common.cache.FetchResult
+import com.lagradost.common.cache.fetchDocument
 import kotlinx.coroutines.CancellationException
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
-class JavGuru(private val customPages: List<CustomPage> = emptyList()) : MainAPI() {
+class JavGuru(
+    private val customPages: List<CustomPage> = emptyList(),
+    private val cachedClient: CacheAwareClient? = null,
+    private val appContext: Context? = null,
+    private val watchHistoryConfig: WatchHistoryConfig? = null
+) : MainAPI() {
     companion object {
         private const val TAG = "JavGuru"
 
@@ -65,10 +76,20 @@ class JavGuru(private val customPages: List<CustomPage> = emptyList()) : MainAPI
             } else {
                 if (page == 1) "${request.data}/" else "${request.data}/page/$page/"
             }
-            val document = app.get(url, headers = mainHeaders).document
+            val document = cachedClient.fetchDocument(url) { headers ->
+                    val mergedHeaders = mainHeaders + headers
+                    val resp = app.get(url, headers = mergedHeaders)
+                    FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                }
+            if (document == null) {
+                Log.w(TAG, "No data available for '${request.name}': $url")
+                return newHomePageResponse(HomePageList(request.name, emptyList()), hasNext = false)
+            }
             val items = document.select("div.inside-article, article, div.tabcontent li, .item-list li")
             val home = items.mapNotNull { it.toSearchResponse() }
             val hasNext = document.select("a.next, a.last, nav.pagination").isNotEmpty()
+
+            PluginIntegrationHelper.maybeRecordTagSource(appContext, request.name, request.data, TAG, home.isNotEmpty())
 
             newHomePageResponse(
                 HomePageList(request.name, home, isHorizontalImages = true),
@@ -101,10 +122,21 @@ class JavGuru(private val customPages: List<CustomPage> = emptyList()) : MainAPI
     }
 
     override suspend fun search(query: String, page: Int): SearchResponseList {
+        PluginIntegrationHelper.recordSearch(appContext, query, TAG)
         return try {
             val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
             val url = if (page == 1) "$mainUrl/?s=$encodedQuery" else "$mainUrl/page/$page/?s=$encodedQuery"
-            val document = app.get(url, headers = mainHeaders).document
+            val document = cachedClient.fetchDocument(url,
+                ttlMs = cachedClient?.searchTtlMs
+                ) { headers ->
+                    val mergedHeaders = mainHeaders + headers
+                    val resp = app.get(url, headers = mergedHeaders)
+                    FetchResult(resp.text, resp.code, resp.headers["ETag"], resp.headers["Last-Modified"])
+                }
+            if (document == null) {
+                Log.w(TAG, "No data available for search: $url")
+                return newSearchResponseList(emptyList(), hasNext = false)
+            }
             val items = document.select("div.inside-article, article")
             val results = items.mapNotNull { it.toSearchResponse() }
             val hasNext = document.select("a.next, a.last").isNotEmpty()
@@ -122,7 +154,7 @@ class JavGuru(private val customPages: List<CustomPage> = emptyList()) : MainAPI
         return try {
             val document = app.get(url, headers = mainHeaders).document
 
-            val title = document.selectFirst("h1.tit1")?.text()?.trim()
+            val title = document.selectFirst("h1.tit1, h1.titl")?.text()?.trim()
                 ?: document.selectFirst("h1")?.text()?.trim()
                 ?: return null
 
@@ -138,7 +170,7 @@ class JavGuru(private val customPages: List<CustomPage> = emptyList()) : MainAPI
                 .mapNotNull { Actor(it.text()) }
             val recommendations = document.select("li").mapNotNull { it.toRecommendationResult() }
 
-            newMovieLoadResponse(title, url, TvType.NSFW, url) {
+            newMovieLoadResponse(title, url, if (watchHistoryConfig?.isEnabled(name) == true) TvType.Movie else TvType.NSFW, url) {
                 this.posterUrl = poster
                 this.plot = description
                 this.year = year
